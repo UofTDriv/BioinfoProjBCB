@@ -1,0 +1,78 @@
+
+# Pathogen-Agnostic Metatranscriptomic Disease Networks
+
+**Project Lead:** Denis Rivard | **Supervisor:** Jeffrey Wrana
+
+**Objective:** To integrate host transcriptomic data with microbial taxonomic classification to reveal functional pathogen-gene-microbiome associations.
+
+## Project Overview
+
+This framework transforms microbial read abundance and host differential expression into a heterogeneous pathogen-gene-microbe network. It utilizes a reproducible five-stage pipeline to map how infection-driven gene regulation coincides with shifts in microbial communities.
+
+## Directory Structure
+
+The structure is modeled after the `RNASeqKraken2Ranalysis` workflow:
+
+```
+project_root/
+├── data/
+│   ├── raw_fastqs/            # Stage 1: Raw sequencing data
+│   ├── references/            # Stage 1: GRCh38, Kraken2 DB, GO, etc.
+│   └── processed/             # Stage 2: BAMs, K2 reports, feature counts
+├── Ranalysis/
+│   ├── scripts/               # Core software modules
+│   │   ├── Stage2_Processing/ # Based on RNASeqKraken2Ranalysis
+│   │   ├── Stage3_Integration/# Network construction and data fusion
+│   │   ├── Stage4_Validation/ # Performance metrics
+│   │   └── Stage5_Visual/    # Cytoscape export scripts
+│   ├── databases/             # ePathogen, HOMD, DisGeNET, BioGRID
+│   └── outputs/               # Reports, matrices, and network files
+├── renv/                      # Package management and environment logs
+└── README.md                  # Software plan and documentation
+
+```
+
+## Five-Stage Pipeline Workflow
+
+### 1. Data Acquisition
+
+* **Workflow:** Collection of sample-level metatranscriptomic data and external reference databases.
+* **Inputs:** Raw FASTQ files, Kraken2 standard database, and Gene Ontology (GO) resources.
+* **Outputs:** Structured raw data repository and acquisition logs.
+
+### 2. Data Processing
+
+* **Workflow:** Alignment and classification using the `RNASeqKraken2Ranalysis` suite.
+* **Key Tasks:** Host removal (STAR), host gene quantification (FeatureCounts), and microbial classification (Kraken2/Bracken).
+* **Inputs:** Raw FASTQs.
+* **Outputs:** Host DEG analysis (high vs. low count groups), per-sample metagenomics "kreports," and microbe co-occurrence matrices.
+
+### 3. Data Integration and Modeling
+
+* **Workflow:** Construction of a bipartite pathogen-gene network followed by data fusion into homogeneous layers.
+* **Tasks:** * Compute pathogen-gene correlation matrix (Pearson/Spearman).
+    * Project heterogeneous data into gene-gene and pathogen-pathogen networks.
+    * Denoise via clustering: GO-based modules for genes and neighborhood analysis for pathogens.
+
+
+* **Inputs:** DEG significance values and microbe abundance tables.
+* **Outputs:** Clustered networks and integrated metagraph.
+
+### 4. Model Validation
+
+* **Workflow:** Verification of associations using independent public cohorts and biological benchmarks.
+* **Tasks:** Cross-reference findings with Disease Ontology, HuDiNe (comorbidities), and DisGeNET (gene-disease associations).
+* **Inputs:** Integrated metagraph.
+* **Outputs:** Validation metrics and assessment of reproducibility across public FASTQs (e.g., GEO).
+
+### 5. Visualization and Interaction
+
+* **Workflow:** Network rendering and structural analysis.
+* **Tasks:** Force-directed layout in Cytoscape; encoding node/edge source through color scales and styles.
+* **Inputs:** Final network adjacency files.
+* **Outputs:** High-resolution interactive disease networks revealing systems-level URTI dynamics.
+
+## Software Requirements
+
+* **Environment:** R (v4.0+) with `renv` package management.
+* **Dependencies:** `here`, `ggplot2`, `dplyr`, `igraph` or `tidygraph` (for Stage 3), `DESeq2` (for Stage 2).
