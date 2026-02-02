@@ -1,0 +1,6 @@
+data/*
+outputs/*
+*.graphml
+renv/*
+.vscode/*
+.DS_Store

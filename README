@@ -15,7 +15,7 @@ The structure is modeled after the `RNASeqKraken2Ranalysis` workflow:
 
 ```
 project_root/
-├── data/
+├── data/~/.gemini/settings.json
 │   ├── raw_fastqs/            # Stage 1: Raw sequencing data
 │   ├── references/            # Stage 1: GRCh38, Kraken2 DB, GO, etc.
 │   └── processed/             # Stage 2: BAMs, K2 reports, feature counts
