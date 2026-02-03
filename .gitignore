@@ -4,3 +4,5 @@ outputs/*
 renv/*
 .vscode/*
 .DS_Store
+.Rproj.user
+BioinfoProjBCB.Rproj
