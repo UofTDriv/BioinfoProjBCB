@@ -1,6 +1,8 @@
+## Arguments
+
+DESeq2_processed <- FALSE 
 
 ## Import
-
 # Filename: combine_star_counts.R
 
 # Load necessary libraries
@@ -8,12 +10,16 @@ library(here) # For portable path management
 library(dplyr)
 library(purrr)
 library(readr)
+library(tidyverse)
+library(igraph)
+library(DESeq2)
+library(pheatmap)
+library(foreach)
+library(doParallel)
 
 # 1. Define the directory containing your STAR count matrices
 #    Replace this with the actual path to your 'covid2021_STAR' folder.
-star_counts_dir <- here::here("data", "covid2021_STAR")
-
-rm(count_files)
+star_counts_dir <- here("data", "covid2021_STAR")
 
 b1 <- read_tsv(here("data","covid2021_STAR","b1countMat.txt"))
 b2 <- read_tsv(here("data","covid2021_STAR","b2countMat.txt"))
@@ -24,23 +30,23 @@ b5 <- read_tsv(here("data","covid2021_STAR","b5countMat.txt"))
 # 4. Join all the individual sample data frames into a single matrix.
 #    The `reduce` function iteratively joins the data frames by the 'gene_id' column.
 combined_counts_matrix <- reduce(list(b1, b2, b3, b4, b5), full_join, by = "Geneid")
+rm(star_counts_dir, b1, b2, b3, b4, b5)
 
 write.csv(combined_counts_matrix, here("data", "processed", "combined_star_gene_counts.csv"), row.names = FALSE)
-
 count_mat <- read.csv(here("data", "processed", "combined_star_gene_counts.csv"))
-nrow(count_mat) # 43388
-ncol(count_mat) # 123
-colnames(count_mat)
+# nrow(count_mat) # 43388
+# ncol(count_mat) # 123
+# colnames(count_mat)
 # [1] "Geneid"              "Neg_Control_W_count" "W50504632_count"     "W60804985_count"    
 #   [5] "W60805434_count"     "W60805435_count"     "W61006900_count"     "W61006922_count"   ... 
 
 # kraken2 unaligned results
-species_mat_long_format <- read.csv("outputs/new_samples/unaligned_merged_long260120op.csv")
-colnames(species_mat_long_format)
+species_mat_long_format <- read.csv(here("outputs", "new_samples", "unaligned_merged_long260120op.csv"))
+# colnames(species_mat_long_format)
 # [1] "taxID"               "name"                "taxRank"             "taxLineage"         
 # [5] "sample"              "cladeReads"          "minimizers"          "distinct_minimizers"
-species_mat_wide_format <- read.csv("outputs/new_samples/unaligned_merged260120op.csv")
-colnames(species_mat_wide_format)
+species_mat_wide_format <- read.csv(here("outputs", "new_samples", "unaligned_merged260120op.csv"))
+# colnames(species_mat_wide_format)
 #  [1] "taxID"                             "name"                             
 #  [3] "taxRank"                           "taxLineage"                       
 #  [5] "Neg_Control_W_cladeReads"          "Neg_Control_W_minimizers"         
@@ -49,32 +55,15 @@ colnames(species_mat_wide_format)
 #  [11] "W60804985_cladeReads"              "W60804985_minimizers"             
 #  [13] "W60804985_distinct_minimizers" ... 
 
-species_summary <- read.csv("outputs/new_samples/species_list_unaligned260120op.csv")
-colnames(species_summary)
+species_summary <- read.csv(here("outputs", "new_samples", "species_list_unaligned260120op.csv"))
+# colnames(species_summary)
 # [1] "name"            "taxID"           "taxRank"         "taxLineage"      "Freq"            "cladeReads_mean"
 # [7] "cladeReads_max" 
-nrow(species_mat_long_format) # 194535
-nrow(species_mat_wide_format) # 1965
-nrow(species_summary) # 1965
+# nrow(species_mat_long_format) # 194535
+# nrow(species_mat_wide_format) # 1965
+# nrow(species_summary) # 1965
 
 # Phase 1: Data Cleaning & Alignment ------------------------------------
-# First, we need to ensure the sample names match perfectly between your gene counts and Kraken2 data.
-
-library(tidyverse)
-install.packages("igraph")
-if (!require("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
-
-BiocManager::install("DESeq2")
-install.packages("pheatmap")
-install.packages("foreach")
-install.packages("doParallel")
-library(igraph)
-library(DESeq2)
-library(pheatmap)
-library(foreach)
-library(doParallel)
-
 # 1. Load Data (Assumes variables from your snippet exist)
 # Clean Gene Count Columns: Remove "_count" suffix
 colnames(count_mat) <- gsub("_count", "", colnames(count_mat))
@@ -111,15 +100,28 @@ top_species_df <- species_summary %>%
 target_species <- top_species_df$name
 print(paste("Selected", length(target_species), "species for analysis."))
 
+# Create output directory for DESeq2 results if it doesn't exist
+dir.create(here("outputs", "DESeq2"), showWarnings = FALSE, recursive = TRUE)
+
 # 2. Loop through Species to find Gene Correlations with DESeq2
-# Setup parallel processing
-num_cores <- detectCores() - 1  # Leave one core free
-registerDoParallel(cores = num_cores)
+if(!DESeq2_processed) {
+  # Setup parallel processing
+  num_cores <- 24
+  cl <- makeCluster(num_cores)
+  registerDoParallel(cl)
+
+# Custom combine function that handles NULL values
+combine_with_nulls <- function(...) {
+  args <- list(...)
+  args <- args[!sapply(args, is.null)]  # Remove NULL entries
+  if(length(args) == 0) return(NULL)
+  do.call(rbind, args)
+}
 
 species_gene_edges_list <- foreach(
   i = seq_along(target_species),
   .packages = c('DESeq2', 'dplyr'),
-  .combine = 'rbind',
+  .combine = 'combine_with_nulls',
   .errorhandling = 'remove'
 ) %dopar% {
   
@@ -174,6 +176,10 @@ species_gene_edges_list <- foreach(
   res_df <- as.data.frame(res)
   res_df$gene <- rownames(res_df)
   
+  # Save full DESeq2 results for this species
+  results_filename <- paste0(gsub(" ", "_", sp), "_DESeq2_results.csv")
+  write.csv(res_df, here("outputs", "DESeq2", results_filename), row.names = FALSE)
+  
   # Apply filtering criteria:
   # 1. Omit NA results
   # 2. padj < 0.05
@@ -206,32 +212,49 @@ species_gene_edges_list <- foreach(
   }
 }
 
-# Stop parallel processing
-stopImplicitCluster()
+  # Stop parallel processing
+  stopCluster(cl)
 
-# Convert results list to data frame
-species_gene_edges <- as.data.frame(species_gene_edges_list)
+  # Handle NULL results and convert to data frame
+  if(is.null(species_gene_edges_list)) {
+    species_gene_edges <- data.frame(
+      from = character(),
+      to = character(),
+      type = character(),
+      weight = numeric(),
+      direction = character(),
+      p_value = numeric(),
+      padj = numeric(),
+      logFC = numeric()
+    )
+  } else {
+    species_gene_edges <- as.data.frame(species_gene_edges_list)
+  }
 
-# Handle case where no edges were found
-if(is.null(species_gene_edges) || nrow(species_gene_edges) == 0) {
-  species_gene_edges <- data.frame(
-    from = character(),
-    to = character(),
-    type = character(),
-    weight = numeric(),
-    direction = character(),
-    p_value = numeric(),
-    padj = numeric(),
-    logFC = numeric()
-  )
+  print(paste("Generated", nrow(species_gene_edges), "species-gene edges."))
+
+  write.csv(species_gene_edges, here("data", "processed", "species_gene_edges.csv"), row.names = FALSE)
+} else {
+  print("DESeq2_processed is TRUE, loading pre-computed species-gene edges...")
+  species_gene_edges <- read.csv(here("data", "processed", "species_gene_edges.csv"))
+  print(paste("Loaded", nrow(species_gene_edges), "species-gene edges from file."))
 }
 
-print(paste("Generated", nrow(species_gene_edges), "species-gene edges."))
+# 2a. Build and save Species-Gene network before adding Gene-Gene edges
+species_gene_nodes <- data.frame(id = unique(c(species_gene_edges$from, species_gene_edges$to)))
+species_gene_nodes$node_class <- ifelse(species_gene_nodes$id %in% target_species, "Species", "Gene")
 
-write.csv(species_gene_edges, here("data", "processed", "species_gene_edges.csv"), row.names = FALSE)
-species_gene_edges <- read.csv(here("data", "processed", "species_gene_edges.csv"))
+species_gene_net <- graph_from_data_frame(
+  d = species_gene_edges[, c("from", "to", "weight", "type", "direction", "p_value")],
+  vertices = species_gene_nodes,
+  directed = FALSE
+)
 
-# Phase 3: Gene-Gene Edges via Clustering (Robust Version) ----------------------
+print("Writing Species-Gene network to GraphML...")
+write_graph(species_gene_net, file = "species_gene_network.graphml", format = "graphml")
+print("Species-Gene network saved as species_gene_network.graphml")
+
+# Phase 3: Gene-Gene Edges via Clustering (Parallelized Version) ----------------------
 
 relevant_genes <- unique(species_gene_edges$to)
 
@@ -244,13 +267,24 @@ if(length(relevant_genes) > 5) {
   
   # Dynamic tree cut: Split into modules
   gene_clusters <- cutree(hc, k = min(15, length(relevant_genes)-1)) 
-  
-  gene_gene_edges <- data.frame()
   unique_clusters <- unique(gene_clusters)
   
-  for(k in unique_clusters) {
+  # Setup parallel processing for clustering
+  num_cores <- 24
+  cl <- makeCluster(num_cores)
+  registerDoParallel(cl)
+  
+  # Parallelize cluster processing
+  gene_gene_edges_list <- foreach(
+    k = unique_clusters,
+    .packages = c('dplyr'),
+    .combine = 'combine_with_nulls',
+    .errorhandling = 'remove'
+  ) %dopar% {
     cluster_genes <- names(gene_clusters)[gene_clusters == k]
-    if(length(cluster_genes) < 2) next
+    if(length(cluster_genes) < 2) {
+      return(NULL)
+    }
     
     cluster_cor <- cor(t(sub_gene_mat[cluster_genes, , drop=FALSE]), method="spearman")
     
@@ -272,15 +306,37 @@ if(length(relevant_genes) > 5) {
         p_value = NA
       )
     
-    gene_gene_edges <- rbind(gene_gene_edges, cluster_edges)
+    return(cluster_edges)
+  }
+  
+  stopCluster(cl)
+  
+  # Handle NULL results
+  if(is.null(gene_gene_edges_list)) {
+    gene_gene_edges <- data.frame(
+      from = character(),
+      to = character(),
+      weight = numeric(),
+      type = character(),
+      direction = character(),
+      p_value = character()
+    )
+  } else {
+    gene_gene_edges <- as.data.frame(gene_gene_edges_list)
   }
 } else {
   message("Insufficient genes for clustering.")
-  gene_gene_edges <- data.frame()
+  gene_gene_edges <- data.frame(
+    from = character(),
+    to = character(),
+    weight = numeric(),
+    type = character(),
+    direction = character(),
+    p_value = character()
+  )
 }
 
 # Phase 4: Constructing the Dense Heterogeneous Graph --------------------------
-
 # 1. Species-Species Co-occurrence (The Dense Layer)
 sp_cor <- cor(t(kraken_mat[target_species, , drop=FALSE]), method="spearman")
 sp_cor[lower.tri(sp_cor, diag=TRUE)] <- NA 
@@ -296,7 +352,7 @@ sp_sp_edges <- as.data.frame(as.table(sp_cor)) %>%
     p_value = NA
   )
 
-# 2. Combine all layers safely
+# 2b. Combine all layers safely
 all_edges <- rbind(
   species_gene_edges[, c("from", "to", "weight", "type", "direction", "p_value")],
   gene_gene_edges[, c("from", "to", "weight", "type", "direction", "p_value")],
@@ -320,14 +376,8 @@ print(paste("Total Gene Nodes:", nrow(gene_nodes)))
 print(paste("Total Species Nodes:", nrow(species_nodes)))
 print(paste("Total Nodes:", nrow(nodes)))
 
-# Export for Cytoscape (Option A: File Export)
+# Export for Cytoscape
 # This creates a GraphML file you can File > Import > Network from File in Cytoscape
+print("Writing Heterogeneous Network to GraphML...")
 write_graph(net, file = "heterogeneous_network.graphml", format = "graphml")
 print("Graph saved as heterogeneous_network.graphml")
-
-# Load graph
-net <- read_graph("heterogeneous_network.graphml")
-
-# Export for Cytoscape (Option B: Direct Connection via RCy3)
-library(RCy3)
-createNetworkFromIgraph(net, title = "Dense_Heterogeneous_Net")
