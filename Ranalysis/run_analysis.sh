@@ -8,4 +8,4 @@
 #SBATCH -o /home/wranalab/derivard/2026metaseq_pipeline/new_pipeline/jobs/%x_%j.out
 
 # Run the R analysis script
-Rscript /home/wranalab/derivard/2026metaseq_pipeline/new_pipeline/Ranalysis/scripts/Stage3_Integration/filtered_gene-path_associations.R
+Rscript /home/wranalab/derivard/2026metaseq_pipeline/new_pipeline/Ranalysis/scripts/Stage3_Integration/main_gene_path_associations.R
