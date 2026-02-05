@@ -291,6 +291,9 @@ show_help <- function() {
   cat("  --unaligned-bracken <DIR>  Path to unaligned bracken folder (default: NULL)\n")
   cat("  --nonhuman-kreports <DIR>  Path to nonhuman kreports folder (default: NULL)\n")
   cat("  --nonhuman-bracken <DIR>   Path to nonhuman bracken folder (default: NULL)\n")
+  cat("  --rpm-dir <DIR>           Path to RPM count matrix folder (default: data/METASEQ_pipeline/RPM)\n")
+  cat("  --counts-output-dir <DIR> Path to output filtered counts (default: data/processed)\n")
+  cat("  --rrna-file <FILE>        Path to rRNA gene list CSV (default: Ranalysis/databases/hgnc_rRNAgenelist.csv)\n")
   cat("  --runtime-dir <DIR>       Path to runtime folder for parsing runtime files (default: NULL)\n")
   cat("  --rrstats-dir <DIR>       Path to read statistics folder for parsing rrstats files (default: NULL)\n")
   cat("  --metadata-dir <DIR>      Path to directory containing sample metadata CSV files (default: NULL)\n")
@@ -299,6 +302,7 @@ show_help <- function() {
   cat("  --subspecies              Include subspecies (S1, S2, S3) in addition to species (default: FALSE)\n")
   cat("  --params                  Add confidence_levels, minimum_hit_groups, and human_reads columns to long data (default: FALSE)\n")
   cat("  --parallel                Use parallel processing with cluster from global environment 'cl' (default: FALSE)\n")
+  cat("  --skip-counts             Skip RPM count matrix merging and gene filtering (default: FALSE)\n")
   cat("  --output                  Save results to CSV files (default: FALSE)\n")
   cat("  --output-dir <DIR>         Output directory (default: outputs/full_run)\n")
   cat("Filtering:\n")
@@ -344,6 +348,7 @@ INCLUDE_SUBSPECIES <- FALSE  # Set to FALSE to exclude subspecies
 MINIMIZER_RATIO <- NULL  # Set to NULL to skip minimizer ratio filtering
 MINIMIZER_THRESHOLD <- NULL  # Set to NULL to skip minimizer threshold filtering
 USE_PARALLEL <- FALSE  # Set to FALSE to skip parallel processing
+PROCESS_COUNTS <- TRUE  # Set to TRUE to merge RPM count matrices and filter genes
 
 # Default input directory paths
 UNALIGNED_KREPORTS_DIR <- NULL
@@ -353,7 +358,10 @@ NONHUMAN_BRACKEN_DIR <- NULL
 RUNTIME_DIR <- NULL
 RRSTATS_DIR <- NULL
 METADATA_DIR <- NULL
-OUTPUT_DIR <- here("outputs", "new_samples")
+OUTPUT_DIR <- here("data", "processed")
+RPM_DIR <- here("data", "METASEQ_pipeline", "RPM")
+COUNTS_OUTPUT_DIR <- here("data", "processed")
+RRNA_FILE <- here("Ranalysis", "databases", "hgnc_rRNAgenelist.csv")
 
 # Parse command line arguments for configuration
 if (length(args) > 0) {
@@ -399,6 +407,18 @@ if (length(args) > 0) {
       METADATA_DIR <- normalizePath(args[i + 1], mustWork = FALSE)
       cat("Sample metadata directory set to:", METADATA_DIR, "\n")
       i <- i + 2
+    } else if (args[i] == "--rpm-dir" && i < length(args)) {
+      RPM_DIR <- normalizePath(args[i + 1], mustWork = FALSE)
+      cat("RPM directory set to:", RPM_DIR, "\n")
+      i <- i + 2
+    } else if (args[i] == "--counts-output-dir" && i < length(args)) {
+      COUNTS_OUTPUT_DIR <- normalizePath(args[i + 1], mustWork = FALSE)
+      cat("Counts output directory set to:", COUNTS_OUTPUT_DIR, "\n")
+      i <- i + 2
+    } else if (args[i] == "--rrna-file" && i < length(args)) {
+      RRNA_FILE <- normalizePath(args[i + 1], mustWork = FALSE)
+      cat("rRNA gene list set to:", RRNA_FILE, "\n")
+      i <- i + 2
     } else if (args[i] == "--output-dir" && i < length(args)) {
       OUTPUT_DIR <- normalizePath(args[i + 1], mustWork = FALSE)
       cat("Output directory set to:", OUTPUT_DIR, "\n")
@@ -426,6 +446,10 @@ if (length(args) > 0) {
     } else if (args[i] == "--parallel") {
       USE_PARALLEL <- TRUE
       cat("Parallel processing enabled\n")
+      i <- i + 1
+    } else if (args[i] == "--skip-counts") {
+      PROCESS_COUNTS <- FALSE
+      cat("RPM count matrix processing disabled\n")
       i <- i + 1
     } else {
       cat("Unknown argument:", args[i], "\n")
@@ -469,6 +493,10 @@ cat("  Runtime directory:", RUNTIME_DIR, "\n")
 cat("  Read statistics directory:", RRSTATS_DIR, "\n")
 cat("  Sample metadata directory:", METADATA_DIR, "\n")
 cat("  Output directory:", OUTPUT_DIR, "\n")
+cat("  RPM directory:", RPM_DIR, "\n")
+cat("  Counts output directory:", COUNTS_OUTPUT_DIR, "\n")
+cat("  rRNA gene list:", RRNA_FILE, "\n")
+cat("  Process RPM count matrices:", PROCESS_COUNTS, "\n")
 cat("=====================\n\n")
 
 # Setup parallel processing if requested
@@ -1492,6 +1520,126 @@ parse_rrstats_files <- function(rrstats_folder) {
   }
 }
 
+# Count matrix helpers (RPM)
+read_count_matrix <- function(file_path) {
+  if (!file.exists(file_path)) {
+    warning("Count matrix file not found: ", file_path)
+    return(NULL)
+  }
+  count_df <- tryCatch({
+    utils::read.delim(file_path, sep = "\t", header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
+  }, error = function(e) {
+    warning("Failed to read count matrix: ", basename(file_path), " - ", e$message)
+    return(NULL)
+  })
+  if (is.null(count_df) || nrow(count_df) == 0) {
+    return(NULL)
+  }
+  if (!"Geneid" %in% colnames(count_df)) {
+    colnames(count_df)[1] <- "Geneid"
+  }
+  return(count_df)
+}
+
+merge_count_matrices <- function(rpm_dir) {
+  if (is.null(rpm_dir) || !dir.exists(rpm_dir)) {
+    warning("RPM directory not found: ", rpm_dir)
+    return(NULL)
+  }
+  rpm_files <- list.files(rpm_dir, pattern = "countMat.*\\.(txt|csv)$", full.names = TRUE)
+  if (length(rpm_files) == 0) {
+    warning("No countMat files found in: ", rpm_dir)
+    return(NULL)
+  }
+  cat("Merging", length(rpm_files), "count matrices from", rpm_dir, "\n")
+  count_list <- lapply(rpm_files, read_count_matrix)
+  count_list <- count_list[!sapply(count_list, is.null)]
+  if (length(count_list) == 0) {
+    return(NULL)
+  }
+  combined <- reduce(count_list, full_join, by = "Geneid")
+  combined <- combined %>%
+    mutate(Geneid = as.character(Geneid))
+  colnames(combined) <- gsub("_count$", "", colnames(combined))
+  if (any(duplicated(colnames(combined)))) {
+    warning("Duplicate column names detected after merge; making names unique")
+    colnames(combined) <- make.unique(colnames(combined))
+  }
+  return(combined)
+}
+
+filter_gene_counts <- function(count_mat, rrna_file) {
+  if (is.null(count_mat) || nrow(count_mat) == 0) {
+    return(NULL)
+  }
+  cat("Initial gene count:", nrow(count_mat), "\n")
+  # Step 1: Remove rRNA genes
+  if (!is.null(rrna_file) && file.exists(rrna_file)) {
+    cat("Removing rRNA genes...\n")
+    rrnalist <- read.csv(rrna_file)
+    if ("Approved.symbol" %in% colnames(rrnalist)) {
+      count_mat <- subset(count_mat, !(Geneid %in% rrnalist$Approved.symbol))
+    }
+    cat("  After rRNA removal:", nrow(count_mat), "genes\n")
+  } else {
+    cat("  No rRNA gene list found, skipping rRNA filtering\n")
+  }
+  # Step 2: Drop rows which are all 0
+  cat("Removing zero-count genes...\n")
+  numeric_cols <- count_mat %>% select(where(is.numeric))
+  keep_rows <- rowSums(numeric_cols, na.rm = TRUE) > 0
+  count_mat <- count_mat[keep_rows, , drop = FALSE]
+  cat("  After zero removal:", nrow(count_mat), "genes\n")
+  # Step 3: Merge alternative splice genes
+  cat("Merging alternative splice variants (-AS#)...\n")
+  count_mat$Geneid_trim <- gsub("-AS[0-9]", "", count_mat$Geneid)
+  count_mat <- count_mat %>%
+    select(-Geneid) %>%
+    group_by(Geneid_trim) %>%
+    summarize(across(where(is.numeric), sum, na.rm = TRUE), .groups = "drop")
+  colnames(count_mat)[1] <- "Geneid"
+  cat("  After AS merging:", nrow(count_mat), "genes\n")
+  # Step 4: Merge duplicate gene variants
+  cat("Merging duplicate gene variants (_#)...\n")
+  count_mat$Geneid_trim2 <- gsub("_[0-9]", "", count_mat$Geneid)
+  count_mat <- count_mat %>%
+    select(-Geneid) %>%
+    group_by(Geneid_trim2) %>%
+    summarize(across(where(is.numeric), sum, na.rm = TRUE), .groups = "drop")
+  colnames(count_mat)[1] <- "Geneid"
+  cat("  After duplicate merging:", nrow(count_mat), "genes\n")
+  # Step 5: Remove LOC genes
+  cat("Removing LOC genes...\n")
+  count_mat <- count_mat %>% filter(!grepl("^LOC[0-9]*", Geneid))
+  cat("  After LOC removal:", nrow(count_mat), "genes\n")
+  # Step 6: Remove LINC genes
+  cat("Removing LINC genes...\n")
+  count_mat <- count_mat %>% filter(!grepl("^LINC[0-9]*", Geneid))
+  cat("  After LINC removal:", nrow(count_mat), "genes\n")
+  return(as.data.frame(count_mat))
+}
+
+process_gene_counts <- function(rpm_dir, counts_output_dir, rrna_file) {
+  combined_counts <- merge_count_matrices(rpm_dir)
+  if (is.null(combined_counts)) {
+    warning("No count matrices merged; skipping gene filtering")
+    return(NULL)
+  }
+  if (!dir.exists(counts_output_dir)) {
+    dir.create(counts_output_dir, recursive = TRUE)
+  }
+  combined_path <- file.path(counts_output_dir, "combined_star_gene_counts.csv")
+  write.csv(combined_counts, combined_path, row.names = FALSE)
+  cat("Combined gene count matrix saved to:", combined_path, "\n")
+  filtered_counts <- filter_gene_counts(combined_counts, rrna_file)
+  if (!is.null(filtered_counts)) {
+    filtered_path <- file.path(counts_output_dir, "filtered_gene_counts.csv")
+    write.csv(filtered_counts, filtered_path, row.names = FALSE)
+    cat("Filtered gene count matrix saved to:", filtered_path, "\n")
+  }
+  return(list(combined = combined_counts, filtered = filtered_counts))
+}
+
 # Main processing function
 process_dataset <- function(dataset_name, kreports_folder, bracken_folder = NULL, 
                             process_bracken = PROCESS_BRACKEN, add_params = ADD_PARAMS, 
@@ -1584,6 +1732,13 @@ if (SAVE_OUTPUT) {
   output_csv_file(unaligned_results$merged, "unaligned_merged", output_dir, "op")
   output_csv_file(unaligned_results$merged_long, "unaligned_merged_long", output_dir, "op")
   output_csv_file(unaligned_results$species_list, "species_list_unaligned", output_dir, "op")
+  processed_output_dir <- here("data", "processed")
+  if (!dir.exists(processed_output_dir)) {
+    dir.create(processed_output_dir, recursive = TRUE)
+  }
+  write.csv(unaligned_results$merged, file.path(processed_output_dir, "unaligned_merged.csv"), row.names = FALSE)
+  write.csv(unaligned_results$merged_long, file.path(processed_output_dir, "unaligned_merged_long.csv"), row.names = FALSE)
+  write.csv(unaligned_results$species_list, file.path(processed_output_dir, "species_list_unaligned.csv"), row.names = FALSE)
   
   # Save unaligned bracken data if it exists
   if (!is.null(unaligned_results$bracken_data) && nrow(unaligned_results$bracken_data) > 0) {
@@ -1595,6 +1750,9 @@ if (SAVE_OUTPUT) {
     output_csv_file(nonhuman_results$merged, "nonhuman_merged", output_dir, "op")
     output_csv_file(nonhuman_results$merged_long, "nonhuman_merged_long", output_dir, "op")
     output_csv_file(nonhuman_results$species_list, "species_list_nonhuman", output_dir, "op")
+    write.csv(nonhuman_results$merged, file.path(processed_output_dir, "nonhuman_merged.csv"), row.names = FALSE)
+    write.csv(nonhuman_results$merged_long, file.path(processed_output_dir, "nonhuman_merged_long.csv"), row.names = FALSE)
+    write.csv(nonhuman_results$species_list, file.path(processed_output_dir, "species_list_nonhuman.csv"), row.names = FALSE)
     
     # Save nonhuman bracken data if it exists
     if (!is.null(nonhuman_results$bracken_data) && nrow(nonhuman_results$bracken_data) > 0) {
@@ -1678,5 +1836,14 @@ if (SAVE_OUTPUT) {
   cat("Processing completed successfully!\n")
 }
 
+# Process RPM count matrices and filter genes
+if (PROCESS_COUNTS) {
+  cat("\n=== Processing RPM count matrices ===\n")
+  count_results <- process_gene_counts(RPM_DIR, COUNTS_OUTPUT_DIR, RRNA_FILE)
+  if (is.null(count_results)) {
+    cat("No RPM count matrices processed\n")
+  }
+}
+
 # Clean up configuration variables
-rm(args, PROCESS_BRACKEN, SAVE_OUTPUT, ADD_PARAMS, INCLUDE_SUBSPECIES, USE_PARALLEL, OUTPUT_DIR, MIN_CLADE_READS, RUNTIME_DIR, RRSTATS_DIR, METADATA_DIR, TOP_SPECIES_N, parsed_metadata)
+rm(args, PROCESS_BRACKEN, SAVE_OUTPUT, ADD_PARAMS, INCLUDE_SUBSPECIES, USE_PARALLEL, OUTPUT_DIR, MIN_CLADE_READS, RUNTIME_DIR, RRSTATS_DIR, METADATA_DIR, TOP_SPECIES_N, parsed_metadata, RPM_DIR, COUNTS_OUTPUT_DIR, RRNA_FILE, PROCESS_COUNTS)

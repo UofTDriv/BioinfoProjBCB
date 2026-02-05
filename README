@@ -15,18 +15,22 @@ The structure is modeled after the `RNASeqKraken2Ranalysis` workflow:
 
 ```
 project_root/
-├── data/~/.gemini/settings.json
-│   ├── raw_fastqs/            # Stage 1: Raw sequencing data
+├── data/
+│   ├── METASEQ_pipeline/      # Stage 1: Processing Raw sequencing data
+│   ├── other/                 # Stage 2: Other mats
 │   ├── references/            # Stage 1: GRCh38, Kraken2 DB, GO, etc.
-│   └── processed/             # Stage 2: BAMs, K2 reports, feature counts
+│   └── processed/             # Stage 2: Combined/filtered matrixes
+├── outputs/
+│   ├── DESeq2_results
+│   └── Graphs
 ├── Ranalysis/
 │   ├── scripts/               # Core software modules
-│   │   ├── Stage2_Processing/ # Based on RNASeqKraken2Ranalysis
+│   │   ├── Stage1_Data_acquisition # Based on RNASeqKraken2Ranalysis
+│   │   ├── Stage2_Processing/ # DESeq2 analysis
 │   │   ├── Stage3_Integration/# Network construction and data fusion
 │   │   ├── Stage4_Validation/ # Performance metrics
 │   │   └── Stage5_Visual/    # Cytoscape export scripts
-│   ├── databases/             # ePathogen, HOMD, DisGeNET, BioGRID
-│   └── outputs/               # Reports, matrices, and network files
+│   └── databases/             # ePathogen, HOMD, DisGeNET, BioGRID
 ├── renv/                      # Package management and environment logs
 └── README.md                  # Software plan and documentation
 

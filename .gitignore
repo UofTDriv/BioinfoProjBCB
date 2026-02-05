@@ -6,3 +6,4 @@ renv/*
 .DS_Store
 .Rproj.user
 BioinfoProjBCB.Rproj
+.Rhistory
