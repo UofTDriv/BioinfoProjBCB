@@ -1,14 +1,17 @@
 #code excerpt for denis
+library(here)
+library(dplyr)
+library(ggplot2)
+install.packages("ggfortify")
+library(ggfortify)
 
-
-rnacnt<-read.table("....CountMat.txt", sep = "\t",header = T)
+rnacnt<-read.table("data/processed/genes/combined_countMat.txt", sep = "\t",header = T)
 head(rnacnt)
 nrow(rnacnt)
 #43388
 
-
 ##rrna
-rrnalist<-read.csv("hgnc_rRNAgenelist.csv", header = T)
+rrnalist<-read.csv("data/other/hgnc_rRNAgenelist.csv", header = T)
 rrnalist
 #use Approved.symbol column to match my counts
 
@@ -24,7 +27,7 @@ rrna_marked_agg_t$othergenes<-as.numeric(rrna_marked_agg_t$othergenes); rrna_mar
 
 rrna_marked_agg_t$sumgenes<-rrna_marked_agg_t$othergenes + rrna_marked_agg_t$rrna_genes
 rrna_marked_agg_t$percentrrna<-rrna_marked_agg_t$rrna_genes / rrna_marked_agg_t$sumgenes * 100
-write.table(rrna_marked_agg_t, file = "rrna_rates_datasetRNAseq.txt", sep = "\t", quote = F)
+write.table(rrna_marked_agg_t, file = "data/processed/genes/rrna_rates_datasetRNAseq.txt", sep = "\t", quote = F)
 #save rrna table
 
 
@@ -36,7 +39,7 @@ nrow(counts_filt) #43349
 counts_filt<-counts_filt %>% rowwise() %>% mutate(total = sum(c_across(where(is.numeric))))
 head(counts_filt)
 counts_filt<-counts_filt[counts_filt$total > 0,]
-nrow(counts_filt) #28617
+nrow(counts_filt) #39745
 counts_filt$total<-NULL
 
 
@@ -64,11 +67,11 @@ head(rawtablefiltsum)
 rawtablefiltsum<-as.data.frame(rawtablefiltsum)
 rownames(rawtablefiltsum)<-rawtablefiltsum$Geneid.trim; rawtablefiltsum$Geneid.trim<-NULL
 head(rawtablefiltsum)
-nrow(rawtablefiltsum)#27753
+nrow(rawtablefiltsum)#38610
 
 #filter again on merged samples
 #skip now since going into DESEq2
-#rawtablefiltsum<-rawtablefiltsum[rowSums(rawtablefiltsum)>5,]
+rawtablefiltsum<-rawtablefiltsum[rowSums(rawtablefiltsum)>5,]
 
 ##filter for the GENE GENE_1 GENE_2 situations 
 counts_filt2<-rawtablefiltsum
@@ -94,14 +97,14 @@ head(rawtablefiltsum2)
 rawtablefiltsum2<-as.data.frame(rawtablefiltsum2)
 rownames(rawtablefiltsum2)<-rawtablefiltsum2$Geneid.trim; rawtablefiltsum2$Geneid.trim<-NULL
 head(rawtablefiltsum2)
-nrow(rawtablefiltsum2)#27505  so removed ~250 genes
+nrow(rawtablefiltsum2)#36792
 
 #also drop all the LOC105371466 types
 listoflocs<-rawtablefiltsum2[grepl("^LOC[0-9]*", rownames(rawtablefiltsum2)),]
 #remove
 rawtablefiltsum2_filt2<-rawtablefiltsum2[!(rownames(rawtablefiltsum2) %in% rownames(listoflocs)),]
 nrow(rawtablefiltsum2_filt2)
-#20369
+#25357
 
 
 ##also the LINC genes
@@ -109,9 +112,9 @@ nrow(rawtablefiltsum2_filt2)
 listoflincs<-rawtablefiltsum2_filt2[grepl("^LINC[0-9]*", rownames(rawtablefiltsum2_filt2)),]
 #remove
 rawtablefiltsum2_filt2<-rawtablefiltsum2_filt2[!(rownames(rawtablefiltsum2_filt2) %in% rownames(listoflincs)),]
-nrow(rawtablefiltsum2_filt2) #19327
+nrow(rawtablefiltsum2_filt2) #23478
 
-#write.table(rawtablefiltsum2_filt2, file = "dataset_filtered_counts.txt", sep = "\t", row.names = T, col.names = T, quote = F)
+write.table(rawtablefiltsum2_filt2, file = "data/processed/genes/dataset_filtered_counts.txt", sep = "\t", row.names = T, col.names = T, quote = F)
 rawtablefiltsum2_filt2<-read.table("dataset_filtered_counts.txt", header = T)
 
 ###Do PCA of these samples.
@@ -123,11 +126,90 @@ pca_res <- prcomp(rawtablefiltsum2_filt2_t[,1:19327], scale. = TRUE)
 autoplot(pca_res, data = rawtablefiltsum2_filt2_t)
 #plot other pcs
 
-pca1<-autoplot(pca_res, x = 1, y = 2, data = rawtablefiltsum2_filt2_t, colour = 'group1') + ggtitle("PCA of RNAseq Samples") + theme_bw() + coord_equal() +
-  xlim(-1, 1) + ylim(-1, 1)
+# create/attach a factor column named `group1` (replace `your_groups` with your real vector)
+rawtablefiltsum2_filt2_t$group1 <- your_groups
 
-pdf("dataset_pca_v2.pdf", width = 5, height = 5)
-pca1
-dev.off()
+# then map colour to that column (returns a ggplot object)
+pca1 <- ggplot2::autoplot(pca_res, x = 1, y = 2, data = rawtablefiltsum2_filt2_t, colour = "group1") +
+  ggtitle("PCA of RNAseq Samples") + theme_bw() + coord_equal() + xlim(-0.15, 0.3) + ylim(-0.15, 0.25)
+
+# save or print the plot (use ggsave instead of print to avoid automatic plotting side-effects)
+ggsave("outputs/plots/dataset_pca_v2.pdf", pca1, width = 5, height = 5)
 
 #continue with Deseq2
+
+# Filtering by Gene Biotype
+# Suggested approach using biomaRt
+if (!require("biomaRt", quietly = TRUE)) {
+    install.packages("biomaRt")
+}
+library(biomaRt)
+
+# 1. Attempt the live Ensembl service (the 'Try' branch)
+gene_info <- tryCatch({
+  message("Attempting to connect to live Ensembl service...")
+  
+  ensembl_live <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+  
+  getBM(attributes = c('hgnc_symbol', 'gene_biotype'), 
+        filters = 'hgnc_symbol', 
+        values = rownames(rawtablefiltsum2_filt2), 
+        mart = ensembl_live)
+
+}, error = function(e) {
+  # 2. This is your 'Else' option: Fallback to Archive Release 114
+  message("Live Ensembl service unavailable. Falling back to Archive Release 114 (May 2025)...")
+  
+  # Note: Release 114 URL
+  archive_host <- "https://may2025.archive.ensembl.org"
+  
+  ensembl_archive <- useMart(
+    biomart = "ensembl", 
+    dataset = "hsapiens_gene_ensembl", 
+    host = archive_host
+  )
+  
+  return(getBM(
+    attributes = c('hgnc_symbol', 'gene_biotype'), 
+    filters = 'hgnc_symbol', 
+    values = rownames(rawtablefiltsum2_filt2), 
+    mart = ensembl_archive
+  ))
+})
+
+# 3. Proceed with filtering using the retrieved gene_info
+protein_coding_genes <- gene_info %>% 
+  filter(gene_biotype == "protein_coding") %>% 
+  pull(hgnc_symbol)
+
+rawtable_pc <- rawtablefiltsum2_filt2[rownames(rawtablefiltsum2_filt2) %in% protein_coding_genes, ]
+
+message(paste("Filtering complete. Remaining protein-coding genes:", nrow(rawtable_pc))) # 23478 - 18415 = 5063 genes removed
+
+# write.table(rawtable_pc, file = "data/processed/genes/dataset_filtered_counts_protein_coding.txt", sep = "\t", row.names = T, col.names = T, quote = F)
+
+# 2. Mitochondrial Gene Removal
+# Filter genes starting with MT- (Human nomenclature)
+mt_genes <- grepl("^MT-", rownames(rawtable_pc))
+rawtable_noMT <- rawtable_pc[!mt_genes, ]
+message(paste("Mitochondrial gene removal complete. Remaining genes:", nrow(rawtable_noMT))) # 18415
+
+# 4. GO-Annotation Eligibility
+if (!require("org.Hs.eg.db", quietly = TRUE)) {
+    install.packages("org.Hs.eg.db")
+}
+library(org.Hs.eg.db)
+
+# Check for Biological Process (BP) annotation availability
+go_mapped <- select(org.Hs.eg.db, 
+                    keys = rownames(rawtable_noMT), 
+                    columns = "GO", 
+                    keytype = "SYMBOL")
+
+# Keep only genes with at least one BP GO term
+annotated_genes <- unique(go_mapped$SYMBOL[!is.na(go_mapped$GO)])
+rawtable_final <- rawtable_noMT[rownames(rawtable_noMT) %in% annotated_genes, ]
+message(paste("GO annotation filtering complete. Remaining genes:", nrow(rawtable_final))) # 18415 - 17979 = 436 genes removed
+
+write.table(rawtable_final, file = "data/processed/genes/dataset_final_filtered_counts.txt", sep = "\t", row.names = T, col.names = T, quote = F)
+write.csv(rawtable_final, file = "data/processed/genes/dataset_final_filtered_counts.csv", row.names = T, col.names = T, quote = F)

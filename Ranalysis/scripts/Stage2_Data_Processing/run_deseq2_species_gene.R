@@ -31,11 +31,12 @@ if ("--help" %in% args || "-h" %in% args) {
   stop("Help requested. Execution stopped.")
 }
 
-FILTERED_COUNTS_PATH <- here("data", "processed", "filtered_gene_counts.csv")
+# FILTERED_COUNTS_PATH <- here("data", "processed", "filtered_gene_counts.csv")
+FILTERED_COUNTS_PATH <- here("data", "processed", "genes", "dataset_final_filtered_counts.csv")
 UNALIGNED_MERGED_PATH <- here("data", "processed", "unaligned_merged.csv")
 SPECIES_LIST_PATH <- here("data", "processed", "species_list_unaligned.csv")
 OUTPUT_DIR <- here("outputs", "DESeq2_results")
-EDGES_OUTPUT_PATH <- here("data", "processed", "species_gene_edges.csv")
+EDGES_OUTPUT_PATH <- here("data", "processed", "genes", "species_gene_edges_extra_filtered.csv")
 USE_EXISTING <- FALSE
 NUM_CORES <- max(1, parallel::detectCores() - 1)
 
@@ -92,11 +93,14 @@ if (!"Geneid" %in% colnames(count_mat)) {
 }
 rownames(count_mat) <- count_mat$Geneid
 
+# Option 1: Using base R (clean and direct)
+colnames(count_mat) <- sub("_count$", "", colnames(count_mat))
+
 if ("Neg_Control_W" %in% colnames(count_mat)) {
-  count_mat <- count_mat %>% select(-Neg_Control_W)
+  count_mat <- count_mat %>% dplyr::select(-Neg_Control_W)
 }
 
-gene_mat <- count_mat %>% select(-Geneid)
+gene_mat <- count_mat %>% dplyr::select(-Geneid)
 cat("Final gene matrix:", nrow(gene_mat), "genes x", ncol(gene_mat), "samples\n")
 
 cat("Loading species data...\n")
@@ -104,10 +108,10 @@ species_mat_wide_format <- read.csv(UNALIGNED_MERGED_PATH)
 species_summary <- read.csv(SPECIES_LIST_PATH)
 
 kraken_mat <- species_mat_wide_format %>%
-  select(name, ends_with("_cladeReads"))
+  dplyr::select(name, ends_with("_cladeReads"))
 colnames(kraken_mat) <- gsub("_cladeReads", "", colnames(kraken_mat))
 rownames(kraken_mat) <- kraken_mat$name
-kraken_mat <- kraken_mat %>% select(-name, -starts_with("Neg_Control"))
+kraken_mat <- kraken_mat %>% dplyr::select(-name, -starts_with("Neg_Control"))
 cat("Kraken matrix:", nrow(kraken_mat), "species x", ncol(kraken_mat), "samples\n")
 
 common_samples <- intersect(colnames(gene_mat), colnames(kraken_mat))
@@ -135,6 +139,7 @@ cat("Selected", length(target_species), "species for analysis.\n")
 if (!dir.exists(OUTPUT_DIR)) {
   dir.create(OUTPUT_DIR, showWarnings = FALSE, recursive = TRUE)
 }
+
 
 num_cores <- min(24, NUM_CORES)
 cat("Setting up parallel processing with", num_cores, "cores...\n")

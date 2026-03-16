@@ -8,6 +8,7 @@ library(here) # For portable path management
 library(dplyr)
 library(purrr)
 library(readr)
+library(parallel)
 library(foreach)
 if (!require("doSNOW", quietly = TRUE)) {
     install.packages("doSNOW")
