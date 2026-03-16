@@ -1547,31 +1547,18 @@ read_count_matrix <- function(file_path) {
     warning("Count matrix file not found: ", file_path)
     return(NULL)
   }
-  
   count_df <- tryCatch({
-    # Read first line to detect separator
-    first_line <- readLines(file_path, n = 1)
-    
-    # Detect separator: if more commas than tabs, use comma; otherwise use tab
-    comma_count <- nchar(first_line) - nchar(gsub(",", "", first_line))
-    tab_count <- nchar(first_line) - nchar(gsub("\t", "", first_line))
-    
-    separator <- if (comma_count > tab_count) "," else "\t"
-    
-    utils::read.delim(file_path, sep = separator, header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
+    utils::read.delim(file_path, sep = "\t", header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
   }, error = function(e) {
     warning("Failed to read count matrix: ", basename(file_path), " - ", e$message)
     return(NULL)
   })
-  
   if (is.null(count_df) || nrow(count_df) == 0) {
     return(NULL)
   }
-  
   if (!"Geneid" %in% colnames(count_df)) {
     colnames(count_df)[1] <- "Geneid"
   }
-  
   return(count_df)
 }
 
