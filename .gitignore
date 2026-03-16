@@ -7,3 +7,4 @@ renv/*
 .Rproj.user
 BioinfoProjBCB.Rproj
 .Rhistory
+renv.lock
