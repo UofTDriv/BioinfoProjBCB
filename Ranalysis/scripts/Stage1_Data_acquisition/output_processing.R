@@ -1541,8 +1541,8 @@ parse_rrstats_files <- function(rrstats_folder) {
   }
 }
 
-# Count matrix helpers (RPM)
-read_count_matrix <- function(file_path) {
+# RPM count matrix helpers
+read_rpm_count_matrix <- function(file_path) {
   if (!file.exists(file_path)) {
     warning("Count matrix file not found: ", file_path)
     return(NULL)
@@ -1573,7 +1573,7 @@ merge_count_matrices <- function(rpm_dir) {
     return(NULL)
   }
   cat("Merging", length(rpm_files), "count matrices from", rpm_dir, "\n")
-  count_list <- lapply(rpm_files, read_count_matrix)
+  count_list <- lapply(rpm_files, read_rpm_count_matrix)
   count_list <- count_list[!sapply(count_list, is.null)]
   if (length(count_list) == 0) {
     return(NULL)
