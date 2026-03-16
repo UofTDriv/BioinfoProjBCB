@@ -15,7 +15,7 @@ suppressPackageStartupMessages({
 get_latest_timestamped_file <- function(input_dir = "inputs", pattern, database_type = NULL) {
   # Special handling for database files
   if (!is.null(database_type)) {
-    db_dir <- here("databases")
+    db_dir <- here("Ranalysis", "databases")
     if (!dir.exists(db_dir)) {
       stop("Databases directory not found: ", db_dir)
     }

@@ -9,15 +9,42 @@
 #              and correlation analysis between datasets
 # Usage: Rscript reportRanalysis.R --input-dir <path> --proj-name <name> [options]
 
-library(here)
-library(parallel)
-library(doParallel)
-library(purrr)
-library(tidyr)
-library(dplyr)
-library(ggplot2)
-library(ggrepel)
-library(stringr)
+if (!require("here", quietly = TRUE)) {
+    install.packages("here")
+}
+if (!require("parallel", quietly = TRUE)) {
+    install.packages("parallel")
+}
+if (!require("doParallel", quietly = TRUE)) {
+    install.packages("doParallel")
+}
+if (!require("purrr", quietly = TRUE)) {
+    install.packages("purrr")
+}
+if (!require("tidyr", quietly = TRUE)) {
+    install.packages("tidyr")
+}
+if (!require("dplyr", quietly = TRUE)) {
+    install.packages("dplyr")
+}
+if (!require("ggplot2", quietly = TRUE)) {
+    install.packages("ggplot2")
+}
+if (!require("ggrepel", quietly = TRUE)) {
+    install.packages("ggrepel")
+}
+if (!require("stringr", quietly = TRUE)) {
+    install.packages("stringr")
+}    
+  library(here)
+  library(parallel)
+  library(doParallel)
+  library(purrr)
+  library(tidyr)
+  library(dplyr)
+  library(ggplot2)
+  library(ggrepel)
+  library(stringr)
 
 # Utility functions from utils.R
 run_as_script <- function() {
@@ -155,7 +182,7 @@ create_config <- function(args = commandArgs(trailingOnly = TRUE)) {
   config <- list(
     INPUT_DIR = here("data","METASEQ_pipeline"),
     PROJ_NAME = NULL,
-    RANALYSIS_DIR = here(),  # Default to current here() location
+    RANALYSIS_DIR = here("Ranalysis"),  # Default to current here() location
     OUTPUT_BASE_DIR = here("data","processed"),
     DATABASES_DIR = here("Ranalysis","databases"),
     TOP_N_FREQ = 25,
