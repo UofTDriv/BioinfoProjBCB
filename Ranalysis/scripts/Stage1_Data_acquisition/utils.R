@@ -191,7 +191,7 @@ collapse.taxRanks <- function(krakenlist,keep_taxRanks=LETTERS,filter_taxon=NULL
     delete.taxon <- child_rows[1,'name'] %in% filter_taxon
     if (delete.taxon) {
       rm.cladeReads <- rm.cladeReads + child_rows[1,'cladeReads']
-      dmessage(sprintf("removed %7s cladeReads, including %s childs, for %s",child_rows[1,'"cladeReads"'],nrow(child_rows)-1,child_rows[1,'name']))
+      message(sprintf("removed %7s cladeReads, including %s childs, for %s",child_rows[1,'"cladeReads"'],nrow(child_rows)-1,child_rows[1,'name']))
       
       ## remove all children
       child_rows <- NULL
@@ -282,7 +282,7 @@ read_report2 <- function(myfile,collapse=TRUE,keep_taxRanks=c("D","K","P","C","O
   first.line <- readLines(myfile,n=1)
   isASCII <-  function(txt) all(charToRaw(txt) <= as.raw(127))
   if (!isASCII(first.line)) {
-    dmessage(myfile," is no valid report - not all characters are ASCII")
+    message(myfile," is no valid report - not all characters are ASCII")
     return(NULL)
   }
   if (is.null(has_header)) {
