@@ -46,6 +46,15 @@ project-name_date/
 ├── [STAR]/
 ├── [BAM]/
 ├── [RPM]/
+│   ├── rpmMat.txt
+│   ├── rpkmMat.txt
+│   ├── countMat.txt
+│   ├── all-featureCounts.summary
+│   ├── all-featureCounts
+│   ├── <sampleid>_count.txt
+│   ├── <sampleid>_RPM.txt
+│   ├── <sampleid>_RPKM.txt
+│   └── ...
 ├── [jobs]/
 ├── [resources]/
 └── [raw_fastqs]/

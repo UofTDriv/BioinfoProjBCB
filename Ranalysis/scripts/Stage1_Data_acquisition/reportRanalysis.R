@@ -117,10 +117,14 @@ show_help <- function() {
   cat("  --output-base-dir <DIR>   Base output directory (default: outputs)\n")
   cat("  --databases-dir <DIR>     Path to databases directory (default: Ranalysis/databases)\n")
   cat("  --top-n-freq <N>          Number of top species for frequency analysis (default: 25)\n")
+  cat("Filtering:\n")
   cat("  --min-reads <N>           Minimum clade reads threshold (default: 0)\n")
   cat("  --exclude-taxid <ID>      Exclude species with this taxonomy ID\n")
   cat("  --minimizer-ratio <R>     Filter by minimum ratio of distinct_minimizers/cladeReads\n")
   cat("  --minimizer-threshold <N> Filter by minimum distinct_minimizers threshold\n")
+  cat("  --no-protein-coding       Skip protein-coding-only gene filtering\n")
+  cat("  --no-remove-mt            Skip mitochondrial gene removal\n")
+  cat("  --no-go-annotation        Skip GO annotation gene filtering\n")
   cat("  --cores <N>               Number of cores to use (default: detectCores())\n")
   cat("  --help, -h                Show this help message\n\n")
   cat("Optional Manual Output Processing Inputs:\n")
@@ -168,6 +172,9 @@ create_config <- function(args = commandArgs(trailingOnly = TRUE)) {
     COUNTS_OUTPUT_DIR = here("data", "processed"),
     RRNA_FILE = here("Ranalysis", "databases", "hgnc_rRNAgenelist.csv"),
     PROCESS_COUNTS = TRUE,
+    PROTEIN_CODING_FILTER = TRUE,
+    REMOVE_MT_GENES = TRUE,
+    GO_ANNOTATION_FILTER = TRUE,
     # Report options
     RT_STATS = FALSE,
     RR_STATS = FALSE,
@@ -301,6 +308,15 @@ create_config <- function(args = commandArgs(trailingOnly = TRUE)) {
         i <- i + 2
       } else if (args[i] == "--skip-counts") {
         config$PROCESS_COUNTS <- FALSE
+        i <- i + 1
+      } else if (args[i] == "--no-protein-coding") {
+        config$PROTEIN_CODING_FILTER <- FALSE
+        i <- i + 1
+      } else if (args[i] == "--no-remove-mt") {
+        config$REMOVE_MT_GENES <- FALSE
+        i <- i + 1
+      } else if (args[i] == "--no-go-annotation") {
+        config$GO_ANNOTATION_FILTER <- FALSE
         i <- i + 1
       } else if (args[i] == "--help" || args[i] == "-h") {
         show_help()
@@ -482,6 +498,15 @@ build_output_processing_args <- function(config) {
   }
   if (!config$PROCESS_COUNTS) {
     args <- c(args, "--skip-counts")
+  }
+  if (!config$PROTEIN_CODING_FILTER) {
+    args <- c(args, "--no-protein-coding")
+  }
+  if (!config$REMOVE_MT_GENES) {
+    args <- c(args, "--no-remove-mt")
+  }
+  if (!config$GO_ANNOTATION_FILTER) {
+    args <- c(args, "--no-go-annotation")
   }
   
   if (config$CORES > 1) {

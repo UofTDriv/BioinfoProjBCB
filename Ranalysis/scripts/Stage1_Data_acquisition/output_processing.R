@@ -311,6 +311,9 @@ show_help <- function() {
   cat("  --top-n <N>               Number of top species to analyze (default: 3)\n")
   cat("  --minimizer-ratio <R>     Filter by minimum ratio of distinct_minimizers/cladeReads (default: NULL)\n")
   cat("  --minimizer-threshold <N> Filter by minimum distinct_minimizers threshold (default: NULL)\n")
+  cat("  --no-protein-coding       Skip protein-coding-only gene filtering (default: FALSE)\n")
+  cat("  --no-remove-mt            Skip mitochondrial gene removal (default: FALSE)\n")
+  cat("  --no-go-annotation        Skip GO annotation gene filtering (default: FALSE)\n")
   cat("Examples:\n")
   cat("  Rscript output_processing_v5.R                          # Default settings\n")
   cat("  Rscript output_processing_v5.R --exclude-taxid 9606     # Exclude Homo sapiens\n")
@@ -349,6 +352,9 @@ MINIMIZER_RATIO <- NULL  # Set to NULL to skip minimizer ratio filtering
 MINIMIZER_THRESHOLD <- NULL  # Set to NULL to skip minimizer threshold filtering
 USE_PARALLEL <- FALSE  # Set to FALSE to skip parallel processing
 PROCESS_COUNTS <- TRUE  # Set to TRUE to merge RPM count matrices and filter genes
+PROTEIN_CODING_FILTER <- TRUE  # Set to TRUE to keep only protein-coding genes
+REMOVE_MT_GENES <- TRUE  # Set to TRUE to remove MT- genes
+GO_ANNOTATION_FILTER <- TRUE  # Set to TRUE to keep genes with any GO annotation
 
 # Default input directory paths
 UNALIGNED_KREPORTS_DIR <- NULL
@@ -451,6 +457,18 @@ if (length(args) > 0) {
       PROCESS_COUNTS <- FALSE
       cat("RPM count matrix processing disabled\n")
       i <- i + 1
+    } else if (args[i] == "--no-protein-coding") {
+      PROTEIN_CODING_FILTER <- FALSE
+      cat("Protein-coding gene filtering disabled\n")
+      i <- i + 1
+    } else if (args[i] == "--no-remove-mt") {
+      REMOVE_MT_GENES <- FALSE
+      cat("Mitochondrial gene removal disabled\n")
+      i <- i + 1
+    } else if (args[i] == "--no-go-annotation") {
+      GO_ANNOTATION_FILTER <- FALSE
+      cat("GO annotation gene filtering disabled\n")
+      i <- i + 1
     } else {
       cat("Unknown argument:", args[i], "\n")
       show_help()
@@ -497,6 +515,9 @@ cat("  RPM directory:", RPM_DIR, "\n")
 cat("  Counts output directory:", COUNTS_OUTPUT_DIR, "\n")
 cat("  rRNA gene list:", RRNA_FILE, "\n")
 cat("  Process RPM count matrices:", PROCESS_COUNTS, "\n")
+cat("  Protein-coding filter:", PROTEIN_CODING_FILTER, "\n")
+cat("  Remove MT genes:", REMOVE_MT_GENES, "\n")
+cat("  GO annotation filter:", GO_ANNOTATION_FILTER, "\n")
 cat("=====================\n\n")
 
 # Setup parallel processing if requested
@@ -1568,7 +1589,10 @@ merge_count_matrices <- function(rpm_dir) {
   return(combined)
 }
 
-filter_gene_counts <- function(count_mat, rrna_file) {
+filter_gene_counts <- function(count_mat, rrna_file,
+                               protein_coding_filter = PROTEIN_CODING_FILTER,
+                               remove_mt_genes = REMOVE_MT_GENES,
+                               go_annotation_filter = GO_ANNOTATION_FILTER) {
   if (is.null(count_mat) || nrow(count_mat) == 0) {
     return(NULL)
   }
@@ -1616,10 +1640,125 @@ filter_gene_counts <- function(count_mat, rrna_file) {
   cat("Removing LINC genes...\n")
   count_mat <- count_mat %>% filter(!grepl("^LINC[0-9]*", Geneid))
   cat("  After LINC removal:", nrow(count_mat), "genes\n")
+
+  # Step 7: Filter to protein-coding genes (optional)
+  if (protein_coding_filter) {
+    cat("Filtering for protein-coding genes (biomaRt)...\n")
+    if (!requireNamespace("biomaRt", quietly = TRUE)) {
+      cat("  biomaRt not installed; attempting installation...\n")
+      tryCatch({
+        install.packages("biomaRt", repos = "https://cloud.r-project.org")
+      }, error = function(e) {
+        warning("Failed to install biomaRt: ", e$message)
+      })
+    }
+
+    if (requireNamespace("biomaRt", quietly = TRUE)) {
+      gene_symbols <- as.character(count_mat$Geneid)
+      gene_info <- tryCatch({
+        ensembl_live <- biomaRt::useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+        biomaRt::getBM(
+          attributes = c("hgnc_symbol", "gene_biotype"),
+          filters = "hgnc_symbol",
+          values = gene_symbols,
+          mart = ensembl_live
+        )
+      }, error = function(e) {
+        cat("  Live Ensembl unavailable; trying Archive Release 114...\n")
+        archive_host <- "https://may2025.archive.ensembl.org"
+        ensembl_archive <- biomaRt::useMart(
+          biomart = "ensembl",
+          dataset = "hsapiens_gene_ensembl",
+          host = archive_host
+        )
+        biomaRt::getBM(
+          attributes = c("hgnc_symbol", "gene_biotype"),
+          filters = "hgnc_symbol",
+          values = gene_symbols,
+          mart = ensembl_archive
+        )
+      })
+
+      if (!is.null(gene_info) && nrow(gene_info) > 0) {
+        protein_coding_genes <- unique(gene_info$hgnc_symbol[gene_info$gene_biotype == "protein_coding"])
+        protein_coding_genes <- protein_coding_genes[!is.na(protein_coding_genes) & nzchar(protein_coding_genes)]
+        if (length(protein_coding_genes) > 0) {
+          count_mat <- count_mat[count_mat$Geneid %in% protein_coding_genes, , drop = FALSE]
+          cat("  After protein-coding filter:", nrow(count_mat), "genes\n")
+        } else {
+          warning("Protein-coding filter returned no matching genes; skipping this step")
+        }
+      } else {
+        warning("No gene biotype annotations returned; skipping protein-coding filter")
+      }
+    } else {
+      warning("biomaRt unavailable; skipping protein-coding filter")
+    }
+  } else {
+    cat("Protein-coding filter skipped (--no-protein-coding)\n")
+  }
+
+  # Step 8: Remove mitochondrial genes (optional)
+  if (remove_mt_genes) {
+    cat("Removing mitochondrial genes (MT-)...\n")
+    count_mat <- count_mat %>% filter(!grepl("^MT-", Geneid))
+    cat("  After MT removal:", nrow(count_mat), "genes\n")
+  } else {
+    cat("Mitochondrial gene removal skipped (--no-remove-mt)\n")
+  }
+
+  # Step 9: Keep only genes with any GO annotation (optional)
+  if (go_annotation_filter) {
+    cat("Filtering genes with GO annotations (org.Hs.eg.db)...\n")
+    if (!requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
+      cat("  org.Hs.eg.db not installed; attempting installation...\n")
+      tryCatch({
+        install.packages("BiocManager", repos = "https://cloud.r-project.org")
+        BiocManager::install("org.Hs.eg.db", ask = FALSE, update = FALSE)
+      }, error = function(e) {
+        warning("Failed to install org.Hs.eg.db: ", e$message)
+      })
+    }
+
+    if (requireNamespace("org.Hs.eg.db", quietly = TRUE) && requireNamespace("AnnotationDbi", quietly = TRUE)) {
+      go_mapped <- tryCatch({
+        AnnotationDbi::select(
+          org.Hs.eg.db::org.Hs.eg.db,
+          keys = as.character(count_mat$Geneid),
+          columns = "GO",
+          keytype = "SYMBOL"
+        )
+      }, error = function(e) {
+        warning("GO annotation query failed: ", e$message)
+        NULL
+      })
+
+      if (!is.null(go_mapped) && nrow(go_mapped) > 0) {
+        annotated_genes <- unique(go_mapped$SYMBOL[!is.na(go_mapped$GO)])
+        annotated_genes <- annotated_genes[!is.na(annotated_genes) & nzchar(annotated_genes)]
+        if (length(annotated_genes) > 0) {
+          count_mat <- count_mat[count_mat$Geneid %in% annotated_genes, , drop = FALSE]
+          cat("  After GO annotation filter:", nrow(count_mat), "genes\n")
+        } else {
+          warning("GO annotation filter returned no matching genes; skipping this step")
+        }
+      } else {
+        warning("No GO annotation data returned; skipping GO filter")
+      }
+    } else {
+      warning("org.Hs.eg.db or AnnotationDbi unavailable; skipping GO annotation filter")
+    }
+  } else {
+    cat("GO annotation filter skipped (--no-go-annotation)\n")
+  }
+
   return(as.data.frame(count_mat))
 }
 
-process_gene_counts <- function(rpm_dir, counts_output_dir, rrna_file) {
+process_gene_counts <- function(rpm_dir, counts_output_dir, rrna_file,
+                                protein_coding_filter = PROTEIN_CODING_FILTER,
+                                remove_mt_genes = REMOVE_MT_GENES,
+                                go_annotation_filter = GO_ANNOTATION_FILTER) {
   combined_counts <- merge_count_matrices(rpm_dir)
   if (is.null(combined_counts)) {
     warning("No count matrices merged; skipping gene filtering")
@@ -1631,7 +1770,13 @@ process_gene_counts <- function(rpm_dir, counts_output_dir, rrna_file) {
   combined_path <- file.path(counts_output_dir, "combined_star_gene_counts.csv")
   write.csv(combined_counts, combined_path, row.names = FALSE)
   cat("Combined gene count matrix saved to:", combined_path, "\n")
-  filtered_counts <- filter_gene_counts(combined_counts, rrna_file)
+  filtered_counts <- filter_gene_counts(
+    combined_counts,
+    rrna_file,
+    protein_coding_filter = isTRUE(protein_coding_filter),
+    remove_mt_genes = isTRUE(remove_mt_genes),
+    go_annotation_filter = isTRUE(go_annotation_filter)
+  )
   if (!is.null(filtered_counts)) {
     filtered_path <- file.path(counts_output_dir, "filtered_gene_counts.csv")
     write.csv(filtered_counts, filtered_path, row.names = FALSE)
@@ -1839,11 +1984,18 @@ if (SAVE_OUTPUT) {
 # Process RPM count matrices and filter genes
 if (PROCESS_COUNTS) {
   cat("\n=== Processing RPM count matrices ===\n")
-  count_results <- process_gene_counts(RPM_DIR, COUNTS_OUTPUT_DIR, RRNA_FILE)
+  count_results <- process_gene_counts(
+    RPM_DIR,
+    COUNTS_OUTPUT_DIR,
+    RRNA_FILE,
+    protein_coding_filter = PROTEIN_CODING_FILTER,
+    remove_mt_genes = REMOVE_MT_GENES,
+    go_annotation_filter = GO_ANNOTATION_FILTER
+  )
   if (is.null(count_results)) {
     cat("No RPM count matrices processed\n")
   }
 }
 
 # Clean up configuration variables
-rm(args, PROCESS_BRACKEN, SAVE_OUTPUT, ADD_PARAMS, INCLUDE_SUBSPECIES, USE_PARALLEL, OUTPUT_DIR, MIN_CLADE_READS, RUNTIME_DIR, RRSTATS_DIR, METADATA_DIR, TOP_SPECIES_N, parsed_metadata, RPM_DIR, COUNTS_OUTPUT_DIR, RRNA_FILE, PROCESS_COUNTS)
+rm(args, PROCESS_BRACKEN, SAVE_OUTPUT, ADD_PARAMS, INCLUDE_SUBSPECIES, USE_PARALLEL, OUTPUT_DIR, MIN_CLADE_READS, RUNTIME_DIR, RRSTATS_DIR, METADATA_DIR, TOP_SPECIES_N, parsed_metadata, RPM_DIR, COUNTS_OUTPUT_DIR, RRNA_FILE, PROCESS_COUNTS, PROTEIN_CODING_FILTER, REMOVE_MT_GENES, GO_ANNOTATION_FILTER)
