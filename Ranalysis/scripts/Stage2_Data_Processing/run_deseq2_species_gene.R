@@ -33,8 +33,8 @@ if ("--help" %in% args || "-h" %in% args) {
 
 # FILTERED_COUNTS_PATH <- here("data", "processed", "filtered_gene_counts.csv")
 FILTERED_COUNTS_PATH <- here("data", "processed", "filtered_gene_counts.csv")
-UNALIGNED_MERGED_PATH <- here("data", "processed", "RanalysisReReRerun","outputs","unaligned_merged260316op.csv")
-SPECIES_LIST_PATH <- here("data", "processed", "RanalysisReReRerun","outputs", "species_list_unaligned260316op.csv")
+UNALIGNED_MERGED_PATH <- here("data", "processed", "unaligned_merged.csv")
+SPECIES_LIST_PATH <- here("data", "processed", "species_list_unaligned.csv")
 OUTPUT_DIR <- here("outputs", "DESeq2_results")
 EDGES_OUTPUT_PATH <- here("data", "processed", "species_gene_edges.csv")
 USE_EXISTING <- FALSE

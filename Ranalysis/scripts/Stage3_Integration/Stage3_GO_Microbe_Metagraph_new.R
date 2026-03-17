@@ -61,14 +61,13 @@ parse_args <- function() {
     filtered_gene_counts = kv$filtered_gene_counts %||%
       here("data", "processed", "filtered_gene_counts.csv"),
     species_list = kv$species_list %||%
-      here("outputs", "new_samples", "species_list_unaligned260120op.csv"),
+      here("data", "processed", "species_list_unaligned260316op.csv"),
     epathogen = kv$epathogen %||% resolve_existing_path(c(
-      here("databases", "epathogen-2025-07-15-result.csv"),
       here("Ranalysis", "databases", "epathogen-2025-07-15-result.csv")
     )),
     deseq_dir = kv$deseq_dir %||% resolve_existing_path(c(
       here("outputs", "DESeq2_test"),
-      here("outputs", "DESeq2")
+      here("outputs", "DESeq2_results")
     )),
     microbe_grouping = tolower(kv$microbe_grouping %||% "risk"),
     out_graphml = kv$out_graphml %||%
@@ -221,27 +220,35 @@ run_fgsea_go_bp <- function(ranks) {
 }
 
 build_go_gene_modules <- function(fgsea_tbl, genes_of_interest) {
+  
+  # 1. Filter for significant terms
   go_terms_use <- fgsea_tbl %>%
-    filter(!is.na(padj), padj < 0.1)
+    dplyr::filter(!is.na(padj), padj < 0.1)
 
+  # Fallback if none are significant
   if (nrow(go_terms_use) == 0) {
     go_terms_use <- fgsea_tbl %>%
-      slice_head(n = min(30, nrow(fgsea_tbl)))
+      dplyr::slice_head(n = min(30, nrow(fgsea_tbl)))
   }
 
+  # 2. Extract Leading Edge genes
+  # Explicitly naming the column in unnest helps avoid ambiguity
   le <- go_terms_use %>%
-    select(pathway, padj, NES, leadingEdge) %>%
-    unnest(leadingEdge) %>%
-    rename(gene = leadingEdge) %>%
-    group_by(gene) %>%
-    arrange(padj, desc(NES), .by_group = TRUE) %>%
-    slice_head(n = 1) %>%
-    ungroup() %>%
-    transmute(gene, go_term = pathway)
+    dplyr::select(pathway, padj, NES, leadingEdge) %>%
+    tidyr::unnest(cols = c(leadingEdge)) %>% 
+    dplyr::rename(gene = leadingEdge) %>%
+    dplyr::mutate(gene = as.character(gene)) %>%
+    dplyr::arrange(padj, dplyr::desc(NES)) %>%
+    # If a gene appears in multiple pathways, pick the most significant one
+    dplyr::group_by(gene) %>%
+    dplyr::slice_head(n = 1) %>%
+    dplyr::ungroup() %>%
+    dplyr::transmute(gene, go_term = pathway)
 
-  tibble(gene = genes_of_interest) %>%
-    left_join(le, by = "gene") %>%
-    mutate(go_term = ifelse(is.na(go_term), "GO_BP_Unassigned", go_term))
+  # 3. Map back to your original gene list
+  tibble::tibble(gene = genes_of_interest) %>%
+    dplyr::left_join(le, by = "gene") %>%
+    dplyr::mutate(go_term = tidyr::replace_na(go_term, "GO_BP_Unassigned"))
 }
 
 build_spearman_modules <- function(gene_mat, genes_of_interest) {
@@ -448,115 +455,111 @@ build_metagraph <- function(species_gene_edges, gene_to_go, microbe_annot, micro
   graph_from_data_frame(d = collapsed_edges, vertices = nodes, directed = FALSE)
 }
 
-main <- function() {
-  cfg <- parse_args()
+cfg <- parse_args()
 
-  cat("Loading inputs...\n")
-  species_gene_edges <- read.csv(cfg$species_gene_edges, stringsAsFactors = FALSE)
-  gene_mat <- read_gene_counts(cfg$filtered_gene_counts)
-  species_list <- read.csv(cfg$species_list, stringsAsFactors = FALSE)
-  epathogen_db <- read.csv(cfg$epathogen, stringsAsFactors = FALSE)
-  deseq_df <- read_deseq_results(cfg$deseq_dir)
+cat("Loading inputs...\n")
+species_gene_edges <- read.csv(cfg$species_gene_edges, stringsAsFactors = FALSE)
+gene_mat <- read_gene_counts(cfg$filtered_gene_counts)
+species_list <- read.csv(cfg$species_list, stringsAsFactors = FALSE)
+epathogen_db <- read.csv(cfg$epathogen, stringsAsFactors = FALSE)
+deseq_df <- read_deseq_results(cfg$deseq_dir)
 
-  required_edge_cols <- c("from", "to", "weight")
-  if (!all(required_edge_cols %in% colnames(species_gene_edges))) {
-    stop("species_gene_edges must contain columns: from, to, weight")
-  }
-
-  genes_of_interest <- unique(as.character(species_gene_edges$to))
-  print(paste("Number of genes of interest:", length(genes_of_interest)))
-  print(paste("Number of genes in gene_mat:", nrow(gene_mat)))
-  print("Head of genes_of_interest:")
-  print(head(genes_of_interest, 10))
-  print("Head of gene_mat rownames:")
-  print(head(rownames(gene_mat), 10))
-
-  cat("Building fgsea gene ranking from DESeq2 outputs...\n")
-  ranking <- build_gene_ranking(species_gene_edges, deseq_df)
-  if (length(ranking$ranks) < 20) {
-    stop("Too few ranked genes for stable GO enrichment. Ranked genes: ", length(ranking$ranks))
-  }
-
-  cat("Running GO:BP enrichment with fgsea...\n")
-  fgsea_tbl <- run_fgsea_go_bp(ranking$ranks)
-  
-  # Format leading edges for exports
-  fgsea_tbl_out <- fgsea_tbl %>%
-    mutate(leadingEdge = purrr::map_chr(leadingEdge, ~ paste(.x, collapse = ";")))
-  
-  write.csv(fgsea_tbl_out, cfg$out_fgsea, row.names = FALSE)
-
-  cat("Exporting GO annotations for RISK...\n")
-  # Filter significant annotations and format for RISK load_annotation_csv()
-  risk_df <- fgsea_tbl_out %>%
-    filter(!is.na(padj), padj < 0.1) %>%
-    rename(label = pathway, nodes = leadingEdge) %>%
-    select(label, nodes)
-  write.csv(risk_df, cfg$out_risk_csv, row.names = FALSE)
-
-  cat("Assigning genes to GO metaclusters from leading edges...\n")
-  gene_to_go <- build_go_gene_modules(fgsea_tbl, genes_of_interest)
-
-  cat("Building Spearman modules for cluster comparison...\n")
-  spearman <- build_spearman_modules(gene_mat, genes_of_interest)
-
-  go_membership <- gene_to_go %>%
-    filter(gene %in% spearman$membership$gene)
-  spearman_membership <- spearman$membership %>%
-    filter(gene %in% go_membership$gene)
-
-  cat("Computing Jaccard overlap and edge-density differences...\n")
-  jaccard_tbl <- compute_jaccard_table(spearman_membership, go_membership)
-
-  spearman_density <- module_density(
-    cor_mat = spearman$cor_mat,
-    modules_df = spearman_membership,
-    module_col = "spearman_cluster",
-    threshold = 0.7
-  ) %>%
-    rename(spearman_cluster = module)
-
-  go_density <- module_density(
-    cor_mat = spearman$cor_mat,
-    modules_df = go_membership,
-    module_col = "go_term",
-    threshold = 0.7
-  ) %>%
-    rename(go_term = module)
-
-  best_match <- jaccard_tbl %>%
-    group_by(spearman_cluster) %>%
-    slice_head(n = 1) %>%
-    ungroup()
-
-  density_comp <- best_match %>%
-    left_join(spearman_density, by = "spearman_cluster") %>%
-    left_join(go_density, by = "go_term", suffix = c("_spearman", "_go")) %>%
-    mutate(density_diff_go_minus_spearman = density_go - density_spearman)
-
-  write.csv(jaccard_tbl, cfg$out_overlap, row.names = FALSE)
-  write.csv(density_comp, cfg$out_density, row.names = FALSE)
-
-  cat("Annotating microbes and creating meta-group mapping...\n")
-  microbe_annot <- annotate_microbes(species_list, epathogen_db)
-
-  cat("Constructing collapsed metagraph...\n")
-  metagraph <- build_metagraph(
-    species_gene_edges = species_gene_edges,
-    gene_to_go = gene_to_go,
-    microbe_annot = microbe_annot,
-    microbe_grouping = cfg$microbe_grouping
-  )
-
-  cat("Writing GraphML for Cytoscape...\n")
-  write_graph(metagraph, file = cfg$out_graphml, format = "graphml")
-
-  cat("Done.\n")
-  cat("GraphML: ", cfg$out_graphml, "\n", sep = "")
-  cat("fgsea table: ", cfg$out_fgsea, "\n", sep = "")
-  cat("RISK Annotations CSV: ", cfg$out_risk_csv, "\n", sep = "")
-  cat("Jaccard table: ", cfg$out_overlap, "\n", sep = "")
-  cat("Density comparison: ", cfg$out_density, "\n", sep = "")
+required_edge_cols <- c("from", "to", "weight")
+if (!all(required_edge_cols %in% colnames(species_gene_edges))) {
+  stop("species_gene_edges must contain columns: from, to, weight")
 }
 
-main()
+genes_of_interest <- unique(as.character(species_gene_edges$to))
+print(paste("Number of genes of interest:", length(genes_of_interest)))
+print(paste("Number of genes in gene_mat:", nrow(gene_mat)))
+print("Head of genes_of_interest:")
+print(head(genes_of_interest, 10))
+print("Head of gene_mat rownames:")
+print(head(rownames(gene_mat), 10))
+
+cat("Building fgsea gene ranking from DESeq2 outputs...\n")
+ranking <- build_gene_ranking(species_gene_edges, deseq_df)
+if (length(ranking$ranks) < 20) {
+  stop("Too few ranked genes for stable GO enrichment. Ranked genes: ", length(ranking$ranks))
+}
+
+cat("Running GO:BP enrichment with fgsea...\n")
+fgsea_tbl <- run_fgsea_go_bp(ranking$ranks)
+
+# Format leading edges for exports
+fgsea_tbl_out <- fgsea_tbl %>%
+  mutate(leadingEdge = purrr::map_chr(leadingEdge, ~ paste(.x, collapse = ";")))
+
+write.csv(fgsea_tbl_out, cfg$out_fgsea, row.names = FALSE)
+
+cat("Exporting GO annotations for RISK...\n")
+# Filter significant annotations and format for RISK load_annotation_csv()
+risk_df <- fgsea_tbl_out %>%
+  filter(!is.na(padj), padj < 0.1) %>%
+  rename(label = pathway, nodes = leadingEdge) %>%
+  select(label, nodes)
+write.csv(risk_df, cfg$out_risk_csv, row.names = FALSE)
+
+cat("Assigning genes to GO metaclusters from leading edges...\n")
+gene_to_go <- build_go_gene_modules(fgsea_tbl, genes_of_interest)
+
+cat("Building Spearman modules for cluster comparison...\n")
+spearman <- build_spearman_modules(gene_mat, genes_of_interest)
+
+go_membership <- gene_to_go %>%
+  filter(gene %in% spearman$membership$gene)
+spearman_membership <- spearman$membership %>%
+  filter(gene %in% go_membership$gene)
+
+cat("Computing Jaccard overlap and edge-density differences...\n")
+jaccard_tbl <- compute_jaccard_table(spearman_membership, go_membership)
+
+spearman_density <- module_density(
+  cor_mat = spearman$cor_mat,
+  modules_df = spearman_membership,
+  module_col = "spearman_cluster",
+  threshold = 0.7
+) %>%
+  rename(spearman_cluster = module)
+
+go_density <- module_density(
+  cor_mat = spearman$cor_mat,
+  modules_df = go_membership,
+  module_col = "go_term",
+  threshold = 0.7
+) %>%
+  rename(go_term = module)
+
+best_match <- jaccard_tbl %>%
+  group_by(spearman_cluster) %>%
+  slice_head(n = 1) %>%
+  ungroup()
+
+density_comp <- best_match %>%
+  left_join(spearman_density, by = "spearman_cluster") %>%
+  left_join(go_density, by = "go_term", suffix = c("_spearman", "_go")) %>%
+  mutate(density_diff_go_minus_spearman = density_go - density_spearman)
+
+write.csv(jaccard_tbl, cfg$out_overlap, row.names = FALSE)
+write.csv(density_comp, cfg$out_density, row.names = FALSE)
+
+cat("Annotating microbes and creating meta-group mapping...\n")
+microbe_annot <- annotate_microbes(species_list, epathogen_db)
+
+cat("Constructing collapsed metagraph...\n")
+metagraph <- build_metagraph(
+  species_gene_edges = species_gene_edges,
+  gene_to_go = gene_to_go,
+  microbe_annot = microbe_annot,
+  microbe_grouping = cfg$microbe_grouping
+)
+
+cat("Writing GraphML for Cytoscape...\n")
+write_graph(metagraph, file = cfg$out_graphml, format = "graphml")
+
+cat("Done.\n")
+cat("GraphML: ", cfg$out_graphml, "\n", sep = "")
+cat("fgsea table: ", cfg$out_fgsea, "\n", sep = "")
+cat("RISK Annotations CSV: ", cfg$out_risk_csv, "\n", sep = "")
+cat("Jaccard table: ", cfg$out_overlap, "\n", sep = "")
+cat("Density comparison: ", cfg$out_density, "\n", sep = "")
