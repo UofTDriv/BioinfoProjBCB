@@ -317,3 +317,52 @@ if (length(edge_dfs) > 0) {
 cat("Generated", nrow(species_gene_edges), "species-gene edges.\n")
 write.csv(species_gene_edges, EDGES_OUTPUT_PATH, row.names = FALSE)
 cat("Species-gene edges saved to:", EDGES_OUTPUT_PATH, "\n")
+
+
+library(ggplot2)
+
+
+# --- Post-loop Diagnostic Plots (Point 5) ---
+
+# 1. Boxplots: Compare Before/After Normalization
+plot_normalization_diagnostics <- function(raw_counts, centered_counts, output_path) {
+  # Subsample genes for rendering speed if matrix is massive
+  sub_idx <- sample(1:nrow(raw_counts), min(1000, nrow(raw_counts)))
+  
+  raw_long <- as.data.frame(raw_counts[sub_idx, ]) %>% 
+    pivot_longer(everything(), names_to = "Sample", values_to = "Expression") %>%
+    mutate(State = "1. Raw Counts")
+    
+  norm_long <- as.data.frame(centered_counts[sub_idx, ]) %>% 
+    pivot_longer(everything(), names_to = "Sample", values_to = "Expression") %>%
+    mutate(State = "2. Log2 + Median-Centered")
+    
+  plot_data <- bind_rows(raw_long, norm_long)
+  
+  box_plot <- ggplot(plot_data, aes(x = Sample, y = Expression, fill = State)) +
+    geom_boxplot(outlier.shape = NA) +
+    facet_wrap(~State, scales = "free_y", ncol = 1) +
+    theme_minimal() +
+    theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), legend.position="none") +
+    labs(title = "Gene Expression Distributions", x = "Samples (Unlabeled)", y = "Expression Level")
+  
+  ggsave(output_path, plot = box_plot, width = 10, height = 8)
+}
+
+# 2. MA Plots: Detect Intensity Bias from DESeq2 CSVs
+plot_batch_ma_from_csv <- function(deseq_results_dir, output_dir) {
+  files <- list.files(deseq_results_dir, pattern = "_results.csv$", full.names = TRUE)
+  for (f in files) {
+    df <- read.csv(f)
+    p <- ggplot(df, aes(x = log10(baseMean), y = log2FoldChange, color = padj < 0.05)) +
+      geom_point(alpha = 0.4) + theme_minimal() +
+      labs(title = paste("MA Plot:", basename(f)))
+    ggsave(file.path(output_dir, paste0(basename(f), "_MA.png")), p)
+  }
+}
+
+# --- AT THE END OF YOUR SCRIPT (Commented Optional Calls) ---
+plot_normalization_boxplots(here("data", "processed", "filtered_gene_counts.csv"), here("outputs", "norm_check.png"))
+
+csv <- read.csv(here("data", "processed", "filtered_gene_counts.csv"), row.names = 1, check.names = FALSE)
+plot_batch_ma_from_csv(here("outputs", "DESeq2_results"), here("outputs", "MA_plots"))
