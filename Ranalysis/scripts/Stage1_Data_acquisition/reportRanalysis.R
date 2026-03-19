@@ -180,22 +180,22 @@ if ("--help" %in% args || "-h" %in% args) {
 # Configuration structure
 create_config <- function(args = commandArgs(trailingOnly = TRUE)) {
   config <- list(
-    INPUT_DIR = here("data","METASEQ_pipeline"),
-    PROJ_NAME = NULL,
+    INPUT_DIR = here("data","input"),
+    PROJ_NAME = "Ranalysis_subspecies_test",
     RANALYSIS_DIR = here("Ranalysis"),  # Default to current here() location
     OUTPUT_BASE_DIR = here("data","processed"),
     DATABASES_DIR = here("Ranalysis","databases"),
     TOP_N_FREQ = 25,
     TOP_N_PLOT = 50,
     MIN_READS = 10,
-    EXCLUDE_TAXID = NULL,
+    EXCLUDE_TAXID = 9606,
     PERFORM_CORRELATION = TRUE,
     ADD_PARAMS = TRUE,
-    INCLUDE_SUBSPECIES = FALSE,
+    INCLUDE_SUBSPECIES = TRUE,
     MINIMIZER_RATIO = NULL,
     MINIMIZER_THRESHOLD = 500,
     CORES = detectCores(),
-    RPM_DIR = here("data", "METASEQ_pipeline", "RPM"),
+    RPM_DIR = here("data", "input", "RPM"),
     COUNTS_OUTPUT_DIR = here("data", "processed"),
     RRNA_FILE = here("Ranalysis", "databases", "hgnc_rRNAgenelist.csv"),
     PROCESS_COUNTS = TRUE,

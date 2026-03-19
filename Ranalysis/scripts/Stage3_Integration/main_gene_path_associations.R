@@ -14,6 +14,9 @@ suppressPackageStartupMessages({
   library(doParallel)
 })
 
+# Source utility functions
+source(here("Ranalysis", "scripts", "Stage1_Data_acquisition", "utils.R"))
+
 # --- ARGUMENT PARSING (Consistent with Stage3 Metagraph) ---
 parse_args <- function() {
   args <- commandArgs(trailingOnly = TRUE)
@@ -32,8 +35,8 @@ parse_args <- function() {
   list(
     # Inputs from output_processing.R
     filtered_gene_counts = kv$filtered_gene_counts %||% here("data", "processed", "filtered_gene_counts.csv"),
-    unaligned_merged = kv$unaligned_merged %||% here("data", "processed", "RanalysisReRerun","outputs","unaligned_merged260316op.csv"),
-    species_list = kv$species_list %||% here("data", "processed", "species_list_unaligned.csv"),
+    unaligned_merged = kv$unaligned_merged %||% get_latest_timestamped_file(input_dir = "data/processed", pattern = "^unaligned_merged.*op.*\\.csv$"),
+    species_list = kv$species_list %||% get_latest_timestamped_file(input_dir = "data/processed", pattern = "^species_list_unaligned.*op.*\\.csv$"),
     # Edges from Stage 2
     species_gene_edges = kv$species_gene_edges %||% here("data", "processed", "species_gene_edges.csv"),
     # Outputs
