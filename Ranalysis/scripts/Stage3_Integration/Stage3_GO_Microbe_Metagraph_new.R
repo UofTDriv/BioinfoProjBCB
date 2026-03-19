@@ -16,6 +16,9 @@ suppressPackageStartupMessages({
   library(msigdbr)
 })
 
+# Source utility functions
+source(here("Ranalysis", "scripts", "Stage1_Data_acquisition", "utils.R"))
+
 `%||%` <- function(x, y) {
   if (is.null(x) || length(x) == 0 || all(is.na(x))) y else x
 }
@@ -61,10 +64,9 @@ parse_args <- function() {
     filtered_gene_counts = kv$filtered_gene_counts %||%
       here("data", "processed", "filtered_gene_counts.csv"),
     species_list = kv$species_list %||%
-      here("data", "processed", "species_list_unaligned260316op.csv"),
-    epathogen = kv$epathogen %||% resolve_existing_path(c(
-      here("Ranalysis", "databases", "epathogen-2025-07-15-result.csv")
-    )),
+      get_latest_timestamped_file(input_dir = "data/processed", pattern = "^species_list_unaligned.*op.*\\.csv$"),
+    epathogen = kv$epathogen %||%
+      get_latest_timestamped_file(input_dir = "Ranalysis/databases", pattern = "^epathogen.*\\.csv$"),
     deseq_dir = kv$deseq_dir %||% resolve_existing_path(c(
       here("outputs", "DESeq2_test"),
       here("outputs", "DESeq2_results")
@@ -496,8 +498,9 @@ cat("Exporting GO annotations for RISK...\n")
 # Filter significant annotations and format for RISK load_annotation_csv()
 risk_df <- fgsea_tbl_out %>%
   filter(!is.na(padj), padj < 0.1) %>%
-  rename(label = pathway, nodes = leadingEdge) %>%
-  select(label, nodes)
+  tidyr::unnest(leadingEdge) %>%    # expand list-column of genes
+  dplyr::rename(label = pathway, nodes = leadingEdge) %>%
+  dplyr::select(label, nodes)
 write.csv(risk_df, cfg$out_risk_csv, row.names = FALSE)
 
 cat("Assigning genes to GO metaclusters from leading edges...\n")
