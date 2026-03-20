@@ -188,7 +188,7 @@ create_config <- function(args = commandArgs(trailingOnly = TRUE)) {
     TOP_N_FREQ = 25,
     TOP_N_PLOT = 50,
     MIN_READS = 10,
-    EXCLUDE_TAXID = NULL,
+    EXCLUDE_TAXID = NULL, 
     PERFORM_CORRELATION = TRUE,
     ADD_PARAMS = TRUE,
     INCLUDE_SUBSPECIES = FALSE,

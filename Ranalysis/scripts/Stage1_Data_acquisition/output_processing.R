@@ -588,35 +588,21 @@ parse_sample_info <- function(filename) {
       result$database_used <- sub("_report$", "", db_part)  # Remove trailing _report
     }
   }
-  # Pattern 4: Specific pattern like "W50504632_S109_bracken_S"
-  else if (grepl("_S\\d+_bracken_S$", sample_name)) {
-    result$trimmed_name <- sub("_S\\d+_bracken_S$", "", sample_name)
+  # Pattern 4: Specific pattern for bracken files with S# like "W50504632_S109_bracken_S" or "W50504632_S109_bracken_S1"
+  else if (grepl("_S\\d+_bracken_S\\d*$", sample_name)) {
+    result$trimmed_name <- sub("_S\\d+_bracken_S\\d*$", "", sample_name)
     result$confidence <- NA
     result$minimum_hits <- NA
     result$database_used <- "unknown"
   }
-  # Pattern 5: Specific pattern like "Neg_Control_W_S90_bracken_S"
-  else if (grepl("_S\\d+_bracken_S$", sample_name)) {
-    result$trimmed_name <- sub("_S\\d+_bracken_S$", "", sample_name)
+  # Pattern 5: Specific pattern for bracken files without S# like "W50504632_bracken_S" or "W50504632_bracken_S1"
+  else if (grepl("_bracken_S\\d*$", sample_name)) {
+    result$trimmed_name <- sub("_bracken_S\\d*$", "", sample_name)
     result$confidence <- NA
     result$minimum_hits <- NA
     result$database_used <- "unknown"
   }
-  # Pattern 6: Specific pattern like "W50504632_bracken_S"
-  else if (grepl("_bracken_S$", sample_name)) {
-    result$trimmed_name <- sub("_bracken_S$", "", sample_name)
-    result$confidence <- NA
-    result$minimum_hits <- NA
-    result$database_used <- "unknown"
-  }
-  # Pattern 7: Specific pattern like "Neg_Control_W_bracken_S"
-  else if (grepl("_bracken_S$", sample_name)) {
-    result$trimmed_name <- sub("_bracken_S$", "", sample_name)
-    result$confidence <- NA
-    result$minimum_hits <- NA
-    result$database_used <- "unknown"
-  }
-  # Pattern 8: Simple pattern with just confidence (fallback)
+  # Pattern 6: Simple pattern with just confidence (fallback)
   else if (grepl("c\\d+", sample_name)) {
     result$trimmed_name <- sub("_c\\d+.*", "", sample_name)
     conf_match <- regmatches(sample_name, regexpr("c\\d+", sample_name))
