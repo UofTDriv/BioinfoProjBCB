@@ -31,10 +31,12 @@ if ("--help" %in% args || "-h" %in% args) {
   stop("Help requested. Execution stopped.")
 }
 
+source(here("Ranalysis", "scripts", "Stage1_Data_acquisition", "utils.R"))
+
 # FILTERED_COUNTS_PATH <- here("data", "processed", "filtered_gene_counts.csv")
 FILTERED_COUNTS_PATH <- here("data", "processed", "filtered_gene_counts.csv")
-UNALIGNED_MERGED_PATH <- here("data", "processed", "unaligned_merged.csv")
-SPECIES_LIST_PATH <- here("data", "processed", "species_list_unaligned.csv")
+UNALIGNED_MERGED_PATH <- get_latest_timestamped_file(input_dir = "data/processed", pattern = "^unaligned_merged.*csv$")
+SPECIES_LIST_PATH <- get_latest_timestamped_file(input_dir = "data/processed", pattern = "^species_list_unaligned.*csv$")
 OUTPUT_DIR <- here("outputs", "DESeq2_results")
 EDGES_OUTPUT_PATH <- here("data", "processed", "species_gene_edges.csv")
 USE_EXISTING <- FALSE
