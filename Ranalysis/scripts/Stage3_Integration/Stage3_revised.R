@@ -82,8 +82,17 @@ run_species_enrichment_parallel <- function(deseq_dir, num_cores = 4) {
 # --- PART 3: SPECIES-SPECIES EDGES ---
 # Build edges from Risk Group and Co-occurrence
 build_species_species_edges <- function(kraken_mat, epathogen_db, cor_threshold = 0.6) {
+  # Keep only clade read abundances and coerce safely to numeric matrix for correlation
+  kraken_num <- kraken_mat %>%
+    select(name, ends_with("_cladeReads")) %>%
+    rename_with(~ gsub("_cladeReads", "", .)) %>%
+    tibble::column_to_rownames("name") %>%
+    as.matrix()
+  storage.mode(kraken_num) <- "numeric"
+  kraken_num[is.na(kraken_num)] <- 0
+
   # 1. Co-occurrence (Spearman Correlation)
-  sp_cor <- cor(t(kraken_mat), method = "spearman")
+  sp_cor <- suppressWarnings(cor(t(kraken_num), method = "spearman", use = "pairwise.complete.obs"))
   sp_cor[lower.tri(sp_cor, diag = TRUE)] <- NA
   co_occ_edges <- as.data.frame(as.table(sp_cor)) %>%
     filter(!is.na(Freq), Freq > cor_threshold) %>%
@@ -129,7 +138,7 @@ sp_go_edges <- enrichment %>%
 transmute(from = species, to = pathway, weight = NES, type = "Species_GO")
 
 cat("Part 3: Building Species-Species edges...\n")
-kraken_df <- read.csv(kraken_path, row.names = 1, check.names = FALSE)
+kraken_df <- read.csv(kraken_path, check.names = FALSE, stringsAsFactors = FALSE)
 epathogen_db <- read.csv(epathogen_path)
 sp_sp_edges <- build_species_species_edges(kraken_df, epathogen_db)
 
@@ -220,16 +229,40 @@ build_species_species_parallel <- function(kraken_path, epathogen_db, num_cores,
     rename_with(~ gsub("_cladeReads", "", .)) %>%
     column_to_rownames("name") %>% 
     as.matrix()
+  storage.mode(kraken_mat) <- "numeric"
   kraken_mat[is.na(kraken_mat)] <- 0
   
   # Filter low-abundance to speed up cor()
-  keep_sp <- rowSums(kraken_mat > 0) > (ncol(kraken_mat) * 0.1)
+  keep_sp <- rowSums(kraken_mat > 0, na.rm = TRUE) > (ncol(kraken_mat) * 0.1)
   kraken_mat <- kraken_mat[keep_sp, ]
   
   # 1. Parallel Spearman Correlation
   # We split the matrix rows and calculate correlations in parallel chunks 
   sp_names <- rownames(kraken_mat)
   n_sp <- length(sp_names)
+
+  if (n_sp < 2) {
+    warning("Not enough species after filtering to compute correlations; returning only risk-group edges.")
+    risk_map <- epathogen_db %>%
+      select(Name, Human.classification) %>%
+      distinct() %>%
+      filter(Human.classification != "NotAnnotated")
+    risk_groups <- unique(risk_map$Human.classification)
+
+    cl <- makeCluster(num_cores)
+    registerDoParallel(cl)
+    shared_risk_edges <- foreach(rg = risk_groups, .combine = rbind, .packages = "dplyr") %dopar% {
+      members <- risk_map %>% filter(Human.classification == rg) %>% pull(Name)
+      if(length(members) < 2) return(NULL)
+
+      expand.grid(from = members, to = members, stringsAsFactors = FALSE) %>%
+        filter(from < to) %>%
+        mutate(weight = 1.0, type = "Species_Species_RiskGroup")
+    }
+    stopCluster(cl)
+    return(shared_risk_edges)
+  }
+
   cl <- makeCluster(num_cores)
   registerDoParallel(cl)
   
@@ -239,7 +272,7 @@ build_species_species_parallel <- function(kraken_path, epathogen_db, num_cores,
     other_rows <- kraken_mat[(i+1):n_sp, , drop=FALSE]
     
     # Calculate one-to-many Spearman correlations
-    cors <- cor(t(target_row), t(other_rows), method = "spearman")
+    cors <- suppressWarnings(cor(t(target_row), t(other_rows), method = "spearman", use = "pairwise.complete.obs"))
     
     data.frame(
       from = sp_names[i],
