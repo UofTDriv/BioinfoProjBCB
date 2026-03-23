@@ -586,3 +586,4 @@ cat("GraphML:", cfg$out_graphml, "\n")
 cat("Annotation CSV:", cfg$out_annotation_csv, "\n")
 cat("Validation CSV:", cfg$out_validation_csv, "\n")
 
+colnames(counttable)
