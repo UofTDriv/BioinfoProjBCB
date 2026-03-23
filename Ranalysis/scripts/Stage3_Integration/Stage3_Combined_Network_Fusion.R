@@ -314,15 +314,12 @@ run_positive_fgsea <- function(deseq_df, padj_thr, lfc_thr) {
     filter(padj < 0.05)
 
   gene_to_top_term <- fg_sig %>%
-    select(pathway, padj, NES, leadingEdge) %>%
+    select(pathway, leadingEdge) %>%
     unnest(cols = c(leadingEdge)) %>%
-    rename(gene = leadingEdge) %>%
-    mutate(gene = as.character(gene)) %>%
-    arrange(padj, desc(NES)) %>%
-    group_by(gene) %>%
-    slice_head(n = 1) %>%
-    ungroup() %>%
-    transmute(label = pathway, nodes = gene)
+    mutate(leadingEdge = as.character(leadingEdge)) %>%
+    group_by(pathway) %>%
+    summarise(nodes = paste(leadingEdge, collapse = ";"), .groups = "drop") %>%
+    transmute(label = pathway, nodes = nodes)
 
   list(fgsea = fg, annotation = gene_to_top_term)
 }
@@ -402,192 +399,190 @@ compute_jaccard_validation <- function(stat_clusters, annotation_df) {
     arrange(desc(jaccard), desc(intersection))
 }
 
-main <- function() {
-  cfg <- parse_args()
+# Main execution
+cfg <- parse_args()
 
-  cat("[Stage3] Loading host and microbial inputs...\n")
-  gene_mat_raw <- load_gene_matrix(cfg$filtered_gene_counts)
-  species_loaded <- load_species_matrix(cfg$species_abundance)
-  species_mat_raw <- species_loaded$species_matrix
-  species_info <- species_loaded$species_info
-  epathogen_map <- load_epathogen_map(cfg$epathogen)
+cat("[Stage3] Loading host and microbial inputs...\n")
+gene_mat_raw <- load_gene_matrix(cfg$filtered_gene_counts)
+species_loaded <- load_species_matrix(cfg$species_abundance)
+species_mat_raw <- species_loaded$species_matrix
+species_info <- species_loaded$species_info
+epathogen_map <- load_epathogen_map(cfg$epathogen)
 
-  deseq_df <- load_deseq_results(cfg$deseq_dir)
+deseq_df <- load_deseq_results(cfg$deseq_dir)
 
-  common_samples <- intersect(colnames(gene_mat_raw), colnames(species_mat_raw))
-  if (length(common_samples) < 3) {
-    stop("Fewer than 3 common samples between host and microbial matrices.")
-  }
-
-  gene_mat <- gene_mat_raw[, common_samples, drop = FALSE]
-  species_mat <- species_mat_raw[, common_samples, drop = FALSE]
-
-  cat("[Stage3] Phase 1: log2(x+1) + median-centering...\n")
-  gene_norm <- phase1_normalize(gene_mat)
-  species_norm <- phase1_normalize(species_mat)
-
-  cat("[Stage3] Building Species_Gene edges from DESeq2 significance...\n")
-  species_gene_edges <- build_species_gene_edges(
-    deseq_df = deseq_df,
-    padj_thr = cfg$padj_threshold,
-    lfc_thr = cfg$log2fc_threshold
-  )
-
-  if (nrow(species_gene_edges) == 0) {
-    warning("No Species_Gene edges found. Graph outputs will contain only correlation layers if available.")
-  }
-
-  species_in_edges <- unique(species_gene_edges$from)
-  if (length(species_in_edges) == 0) {
-    species_in_edges <- rownames(species_norm)
-  }
-
-  gene_in_edges <- unique(species_gene_edges$to)
-  if (length(gene_in_edges) == 0) {
-    gene_in_edges <- rownames(gene_norm)
-  }
-
-  species_use <- intersect(species_in_edges, rownames(species_norm))
-  gene_use <- intersect(gene_in_edges, rownames(gene_norm))
-
-  if (length(species_use) < 2) {
-    warning("Too few overlapping species for species-species correlations.")
-    species_species_edges <- tibble(
-      from = character(), to = character(), weight = numeric(),
-      edge_class = character(), edge_type = character(), raw_value = numeric()
-    )
-  } else {
-    cat("[Stage3] Phase 2: species-species Pearson correlations...\n")
-    sp_cor <- suppressWarnings(cor(t(species_norm[species_use, , drop = FALSE]), method = "pearson", use = "pairwise.complete.obs"))
-    sp_cor[is.na(sp_cor)] <- 0
-
-    cl <- make_parallel_backend(cfg$num_cores)
-    species_species_edges <- parallel_extract_edges_from_cor(
-      cor_mat = sp_cor,
-      threshold = cfg$species_corr_threshold,
-      edge_type = "Species_Species"
-    )
-    parallel::stopCluster(cl)
-  }
-
-  if (length(gene_use) < 2) {
-    warning("Too few overlapping genes for gene-gene correlations.")
-    gene_gene_edges <- tibble(
-      from = character(), to = character(), weight = numeric(),
-      edge_class = character(), edge_type = character(), raw_value = numeric()
-    )
-  } else {
-    cat("[Stage3] Building gene-gene Spearman correlations...\n")
-    gg_cor <- suppressWarnings(cor(t(gene_norm[gene_use, , drop = FALSE]), method = "spearman", use = "pairwise.complete.obs"))
-    gg_cor[is.na(gg_cor)] <- 0
-
-    cl <- make_parallel_backend(cfg$num_cores)
-    gene_gene_edges <- parallel_extract_edges_from_cor(
-      cor_mat = gg_cor,
-      threshold = cfg$gene_corr_threshold,
-      edge_type = "Gene_Gene"
-    )
-    parallel::stopCluster(cl)
-  }
-
-  cat("[Stage3] Phase 3: positive-only GO:BP fgsea for RISK annotation...\n")
-  fgsea_out <- run_positive_fgsea(
-    deseq_df = deseq_df,
-    padj_thr = cfg$padj_threshold,
-    lfc_thr = cfg$log2fc_threshold
-  )
-
-  annotation_df <- fgsea_out$annotation %>% distinct(label, nodes)
-
-  ensure_parent_dir(cfg$out_annotation_csv)
-  write.csv(annotation_df, cfg$out_annotation_csv, row.names = FALSE)
-
-  ensure_parent_dir(cfg$out_fgsea_csv)
-  if (nrow(fgsea_out$fgsea) > 0) {
-    fgsea_export <- fgsea_out$fgsea %>%
-      mutate(leadingEdge = map_chr(leadingEdge, ~ paste(.x, collapse = ";")))
-    write.csv(fgsea_export, cfg$out_fgsea_csv, row.names = FALSE)
-  } else {
-    write.csv(tibble(), cfg$out_fgsea_csv, row.names = FALSE)
-  }
-
-  cat("[Stage3] Phase 4: network assembly and attribute mapping...\n")
-  all_edges <- bind_rows(
-    species_gene_edges,
-    gene_gene_edges,
-    species_species_edges
-  ) %>%
-    mutate(
-      from = as.character(from),
-      to = as.character(to),
-      weight = as.numeric(weight),
-      edge_class = as.character(edge_class),
-      edge_type = as.character(edge_type)
-    )
-
-  if (nrow(all_edges) == 0) {
-    stop("No edges available to build network. Adjust thresholds or input data.")
-  }
-
-  species_set <- unique(c(rownames(species_norm), species_gene_edges$from))
-  gene_set <- unique(c(rownames(gene_norm), species_gene_edges$to))
-
-  species_meta <- species_info %>%
-    transmute(
-      species_name = as.character(name),
-      taxID = suppressWarnings(as.numeric(taxID)),
-      name_norm = normalize_label(species_name)
-    ) %>%
-    left_join(
-      epathogen_map %>% select(taxID, name_norm, risk_group),
-      by = c("taxID", "name_norm")
-    ) %>%
-    mutate(risk_group = ifelse(is.na(risk_group) | risk_group == "", "Unknown", risk_group)) %>%
-    select(species_name, taxID, risk_group)
-
-  nodes <- build_nodes(
-    all_edges,
-    species_set = species_set,
-    gene_set = gene_set,
-    species_meta = species_meta
-  )
-
-  build_graph(all_edges, nodes, cfg$out_graphml)
-
-  stat_clusters <- compute_coexpression_clusters(
-    gene_gene_edges = gene_gene_edges,
-    gene_set = intersect(gene_use, unique(c(all_edges$from, all_edges$to)))
-  )
-
-  jaccard_tbl <- compute_jaccard_validation(stat_clusters, annotation_df)
-  ensure_parent_dir(cfg$out_validation_csv)
-  write.csv(jaccard_tbl, cfg$out_validation_csv, row.names = FALSE)
-
-  if (cfg$export_phases) {
-    if (nrow(species_species_edges) > 0) {
-      sp_nodes <- build_nodes(
-        species_species_edges,
-        species_set = species_set,
-        gene_set = gene_set,
-        species_meta = species_meta
-      )
-      build_graph(species_species_edges, sp_nodes, cfg$out_species_layer)
-    }
-    if (nrow(gene_gene_edges) > 0) {
-      gg_nodes <- build_nodes(
-        gene_gene_edges,
-        species_set = species_set,
-        gene_set = gene_set,
-        species_meta = species_meta
-      )
-      build_graph(gene_gene_edges, gg_nodes, cfg$out_gene_layer)
-    }
-  }
-
-  cat("[Stage3] Done.\n")
-  cat("GraphML:", cfg$out_graphml, "\n")
-  cat("Annotation CSV:", cfg$out_annotation_csv, "\n")
-  cat("Validation CSV:", cfg$out_validation_csv, "\n")
+common_samples <- intersect(colnames(gene_mat_raw), colnames(species_mat_raw))
+if (length(common_samples) < 3) {
+  stop("Fewer than 3 common samples between host and microbial matrices.")
 }
 
-main()
+gene_mat <- gene_mat_raw[, common_samples, drop = FALSE]
+species_mat <- species_mat_raw[, common_samples, drop = FALSE]
+
+cat("[Stage3] Phase 1: log2(x+1) + median-centering...\n")
+gene_norm <- phase1_normalize(gene_mat)
+species_norm <- phase1_normalize(species_mat)
+
+cat("[Stage3] Building Species_Gene edges from DESeq2 significance...\n")
+species_gene_edges <- build_species_gene_edges(
+  deseq_df = deseq_df,
+  padj_thr = cfg$padj_threshold,
+  lfc_thr = cfg$log2fc_threshold
+)
+
+if (nrow(species_gene_edges) == 0) {
+  warning("No Species_Gene edges found. Graph outputs will contain only correlation layers if available.")
+}
+
+species_in_edges <- unique(species_gene_edges$from)
+if (length(species_in_edges) == 0) {
+  species_in_edges <- rownames(species_norm)
+}
+
+gene_in_edges <- unique(species_gene_edges$to)
+if (length(gene_in_edges) == 0) {
+  gene_in_edges <- rownames(gene_norm)
+}
+
+species_use <- intersect(species_in_edges, rownames(species_norm))
+gene_use <- intersect(gene_in_edges, rownames(gene_norm))
+
+if (length(species_use) < 2) {
+  warning("Too few overlapping species for species-species correlations.")
+  species_species_edges <- tibble(
+    from = character(), to = character(), weight = numeric(),
+    edge_class = character(), edge_type = character(), raw_value = numeric()
+  )
+} else {
+  cat("[Stage3] Phase 2: species-species Pearson correlations...\n")
+  sp_cor <- suppressWarnings(cor(t(species_norm[species_use, , drop = FALSE]), method = "pearson", use = "pairwise.complete.obs"))
+  sp_cor[is.na(sp_cor)] <- 0
+
+  cl <- make_parallel_backend(cfg$num_cores)
+  species_species_edges <- parallel_extract_edges_from_cor(
+    cor_mat = sp_cor,
+    threshold = cfg$species_corr_threshold,
+    edge_type = "Species_Species"
+  )
+  parallel::stopCluster(cl)
+}
+
+if (length(gene_use) < 2) {
+  warning("Too few overlapping genes for gene-gene correlations.")
+  gene_gene_edges <- tibble(
+    from = character(), to = character(), weight = numeric(),
+    edge_class = character(), edge_type = character(), raw_value = numeric()
+  )
+} else {
+  cat("[Stage3] Building gene-gene Spearman correlations...\n")
+  gg_cor <- suppressWarnings(cor(t(gene_norm[gene_use, , drop = FALSE]), method = "spearman", use = "pairwise.complete.obs"))
+  gg_cor[is.na(gg_cor)] <- 0
+
+  cl <- make_parallel_backend(cfg$num_cores)
+  gene_gene_edges <- parallel_extract_edges_from_cor(
+    cor_mat = gg_cor,
+    threshold = cfg$gene_corr_threshold,
+    edge_type = "Gene_Gene"
+  )
+  parallel::stopCluster(cl)
+}
+
+cat("[Stage3] Phase 3: positive-only GO:BP fgsea for RISK annotation...\n")
+fgsea_out <- run_positive_fgsea(
+  deseq_df = deseq_df,
+  padj_thr = cfg$padj_threshold,
+  lfc_thr = cfg$log2fc_threshold
+)
+
+annotation_df <- fgsea_out$annotation %>% distinct(label, nodes)
+
+ensure_parent_dir(cfg$out_annotation_csv)
+write.csv(annotation_df, cfg$out_annotation_csv, row.names = FALSE)
+
+ensure_parent_dir(cfg$out_fgsea_csv)
+if (nrow(fgsea_out$fgsea) > 0) {
+  fgsea_export <- fgsea_out$fgsea %>%
+    mutate(leadingEdge = map_chr(leadingEdge, ~ paste(.x, collapse = ";")))
+  write.csv(fgsea_export, cfg$out_fgsea_csv, row.names = FALSE)
+} else {
+  write.csv(tibble(), cfg$out_fgsea_csv, row.names = FALSE)
+}
+
+cat("[Stage3] Phase 4: network assembly and attribute mapping...\n")
+all_edges <- bind_rows(
+  species_gene_edges,
+  gene_gene_edges,
+  species_species_edges
+) %>%
+  mutate(
+    from = as.character(from),
+    to = as.character(to),
+    weight = as.numeric(weight),
+    edge_class = as.character(edge_class),
+    edge_type = as.character(edge_type)
+  )
+
+if (nrow(all_edges) == 0) {
+  stop("No edges available to build network. Adjust thresholds or input data.")
+}
+
+species_set <- unique(c(rownames(species_norm), species_gene_edges$from))
+gene_set <- unique(c(rownames(gene_norm), species_gene_edges$to))
+
+species_meta <- species_info %>%
+  transmute(
+    species_name = as.character(name),
+    taxID = suppressWarnings(as.numeric(taxID)),
+    name_norm = normalize_label(species_name)
+  ) %>%
+  left_join(
+    epathogen_map %>% select(taxID, name_norm, risk_group),
+    by = c("taxID", "name_norm")
+  ) %>%
+  mutate(risk_group = ifelse(is.na(risk_group) | risk_group == "", "Unknown", risk_group)) %>%
+  select(species_name, taxID, risk_group)
+
+nodes <- build_nodes(
+  all_edges,
+  species_set = species_set,
+  gene_set = gene_set,
+  species_meta = species_meta
+)
+
+build_graph(all_edges, nodes, cfg$out_graphml)
+
+stat_clusters <- compute_coexpression_clusters(
+  gene_gene_edges = gene_gene_edges,
+  gene_set = intersect(gene_use, unique(c(all_edges$from, all_edges$to)))
+)
+
+jaccard_tbl <- compute_jaccard_validation(stat_clusters, annotation_df)
+ensure_parent_dir(cfg$out_validation_csv)
+write.csv(jaccard_tbl, cfg$out_validation_csv, row.names = FALSE)
+
+if (cfg$export_phases) {
+  if (nrow(species_species_edges) > 0) {
+    sp_nodes <- build_nodes(
+      species_species_edges,
+      species_set = species_set,
+      gene_set = gene_set,
+      species_meta = species_meta
+    )
+    build_graph(species_species_edges, sp_nodes, cfg$out_species_layer)
+  }
+  if (nrow(gene_gene_edges) > 0) {
+    gg_nodes <- build_nodes(
+      gene_gene_edges,
+      species_set = species_set,
+      gene_set = gene_set,
+      species_meta = species_meta
+    )
+    build_graph(gene_gene_edges, gg_nodes, cfg$out_gene_layer)
+  }
+}
+
+cat("[Stage3] Done.\n")
+cat("GraphML:", cfg$out_graphml, "\n")
+cat("Annotation CSV:", cfg$out_annotation_csv, "\n")
+cat("Validation CSV:", cfg$out_validation_csv, "\n")
+

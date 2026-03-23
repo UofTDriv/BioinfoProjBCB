@@ -183,7 +183,7 @@ create_config <- function(args = commandArgs(trailingOnly = TRUE)) {
     INPUT_DIR = here("data","input"),
     PROJ_NAME = "Ranalysis_subspecies_test",
     RANALYSIS_DIR = here("Ranalysis"),  # Default to current here() location
-    OUTPUT_BASE_DIR = here("data","processed"),
+    OUTPUT_BASE_DIR = here("outputs"),
     DATABASES_DIR = here("Ranalysis","databases"),
     TOP_N_FREQ = 25,
     TOP_N_PLOT = 50,

@@ -930,45 +930,47 @@ process_bracken_folder <- function(bracken_folder) {
   
   cat("Processing", length(bracken_files), "bracken files from", bracken_folder, "\n")
   
-  bracken_list <- map(bracken_files, function(file) {
+  # 1. Read all files into a single "Long" dataframe
+  bracken_long <- map_dfr(bracken_files, function(file) {
     tryCatch({
-      # Ensure libraries are available for parallel processing
-      
       sample_info <- parse_sample_info(file)
       
-      bracken_df <- read.table(file, sep = "\t", header = T, comment.char = "", quote = "") %>%
+      read.table(file, sep = "\t", header = TRUE, comment.char = "", quote = "") %>%
         select(name, taxonomy_id, new_est_reads) %>%
-        rename(taxID = taxonomy_id) %>%
-        rename_with(~ paste0(sample_info$trimmed_name, "_bracken_reads"), 
-                    .cols = "new_est_reads")
-      
-      return(bracken_df)
+        rename(taxID = taxonomy_id, bracken_reads = new_est_reads) %>%
+        mutate(sample = sample_info$trimmed_name) # Keep the sample name as a data column
     }, error = function(e) {
       cat("ERROR processing bracken file:", basename(file), "-", e$message, "\n")
       return(NULL)
     })
   })
   
-  # Combine all bracken reports
-  # Remove NULL entries first
-  bracken_list <- bracken_list[!sapply(bracken_list, is.null)]
+  if (nrow(bracken_long) == 0) return(tibble())
+
+  # 2. AGGREGATE: This is the fix for .x and .y
+  # If two files mapped to the same sample name, we sum their reads here.
+  bracken_aggregated <- bracken_long %>%
+    mutate(name = str_remove_all(name, "'")) %>%
+    group_by(taxID, name, sample) %>%
+    summarise(bracken_reads = sum(bracken_reads, na.rm = TRUE), .groups = "drop")
   
-  if (length(bracken_list) > 0) {
-    bracken_combined <- reduce(bracken_list, full_join, by = c("name", "taxID"))
-  } else {
-    bracken_combined <- tibble()
-  }
-  
-  bracken_combined <- bracken_combined %>% mutate(name = str_remove_all(name, "'"))  # remove apostrophes
+  # 3. Pivot Wider: Create one unique column per sample
+  bracken_combined <- bracken_aggregated %>%
+    pivot_wider(
+      names_from = sample, 
+      values_from = bracken_reads, 
+      names_glue = "{sample}_bracken_reads"
+    )
   
   return(bracken_combined)
 }
 
 # Function to merge kreport and bracken data
 merge_data <- function(kreports_data, bracken_data = NULL, add_params = ADD_PARAMS, report_data = NULL, dataset_name = NULL) {
-  # Merge with bracken data if available
+  
+  # 1. Join with bracken data
   if (!is.null(bracken_data) && nrow(bracken_data) > 0) {
-    # Only join bracken entries whose taxID is present in kreports_data to avoid re-adding filtered species
+    # Ensure we don't introduce new rows for species filtered out of kreports
     bracken_data_filtered <- bracken_data %>%
       filter(taxID %in% kreports_data$taxID)
     merged_data <- kreports_data %>%
@@ -976,47 +978,52 @@ merge_data <- function(kreports_data, bracken_data = NULL, add_params = ADD_PARA
   } else {
     merged_data <- kreports_data
   }
-  
-  # Check for duplicate taxIDs
-  duplicate_taxids <- merged_data %>% 
-      count(taxID) %>% 
-      filter(n > 1)
-  if (nrow(duplicate_taxids) > 0) {
-    warning("Duplicate taxIDs found: ", paste(duplicate_taxids$taxID, collapse = ", "))
-  }
-  
-  # Reorder columns
-  merged_data <- merged_data %>%
-    select(taxID, name, taxRank, taxLineage, everything())
-  
-  # Create long format
+
+  # 2. Pivot Longer
   merged_long <- merged_data %>%
     pivot_longer(
       cols = -c(taxID, name, taxRank, taxLineage),
       names_to = c("sample", "measurement"),
-      names_pattern = "^(.*?)_(cladeReads|minimizers|distinct_minimizers|bracken_reads)$",
+      # This regex is now robust to both naming styles
+      names_pattern = "^(.*?)_(cladeReads|minimizers|distinct_minimizers|bracken_reads|brackenReads)$",
       values_to = "value"
     ) %>%
+    # Important: Deduplicate again just in case of overlaps between Kraken and Bracken names
+    group_by(taxID, name, taxRank, taxLineage, sample, measurement) %>%
+    summarise(value = sum(value, na.rm = TRUE), .groups = "drop") %>%
     pivot_wider(
       names_from = measurement,
       values_from = value
-    ) 
+    )
+
+  # 5. Conditional Filtering logic
+  # We use 'any' and check column names safely to avoid "object not found"
+  cols_present <- colnames(merged_long)
   
-  # Filter out rows where there is a bracken_read but cladeReads is NA
-  # This is to address the issue that we are filtering kreports by distinct minimizer 
-  # but did not apply the same filter to bracken reports
- if ("bracken_reads" %in% names(merged_long)) {
-  merged_long <- merged_long |>
-    dplyr::filter(!(is.na(cladeReads) & !is.na(bracken_reads)))
-} else if ("brackenReads" %in% names(merged_long)) {
-  merged_long <- merged_long |>
-    dplyr::filter(!(is.na(cladeReads) & !is.na(brackenReads)))
-} else {
-  merged_long <- merged_long |>
-    dplyr::filter(!is.na(cladeReads))
-}
+  if ("bracken_reads" %in% cols_present) {
+    merged_long <- merged_long %>%
+      dplyr::filter(!(is.na(cladeReads) & !is.na(bracken_reads)))
+  } else if ("brackenReads" %in% cols_present) {
+    merged_long <- merged_long %>%
+      dplyr::filter(!(is.na(cladeReads) & !is.na(brackenReads)))
+  } else {
+    merged_long <- merged_long %>%
+      dplyr::filter(!is.na(cladeReads))
+  }
+
+  has_bracken <- any(c("bracken_reads", "brackenReads") %in% colnames(merged_long))
   
-  # Add parameter columns if requested
+  if (has_bracken) {
+    # Use sym() to handle dynamic column names safely
+    b_col <- if("bracken_reads" %in% colnames(merged_long)) "bracken_reads" else "brackenReads"
+    merged_long <- merged_long %>%
+      filter(!(is.na(cladeReads) & !is.na(!!sym(b_col))))
+  } else {
+    merged_long <- merged_long %>%
+      filter(!is.na(cladeReads))
+  }
+
+  # 6. Add parameters as before...
   if (add_params) {
     # Join with report_data to get parameter information
     if (!is.null(report_data) && nrow(report_data) > 0) {
@@ -1047,7 +1054,7 @@ merge_data <- function(kreports_data, bracken_data = NULL, add_params = ADD_PARA
       warning("report_data is NULL or empty - cannot add parameter columns")
     }
   }
-  
+
   return(list(merged = merged_data, merged_long = merged_long))
 }
 
