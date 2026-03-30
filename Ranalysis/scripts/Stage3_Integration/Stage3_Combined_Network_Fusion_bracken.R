@@ -49,8 +49,8 @@ parse_args <- function() {
       here("data", "processed", "brackenRanalysis", "outputs", "nonhuman_bracken260330op.csv"),
     species_list_nonhuman = kv$species_list_nonhuman %||%
       here("data", "processed", "brackenRanalysis", "outputs", "species_list_nonhuman260330op.csv"),
-    epathogen = kv$epathogen %||%
-      here("Ranalysis", "databases", "epathogen-2025-07-15-result.csv"),
+    annotated_species = kv$annotated_species %||%
+      here("outputs", "brackenRanalysisAllReports", "outputs", "annotated_species260330.csv"),
     deseq_dir = kv$deseq_dir %||% here("outputs", "DESeq2_results_bracken"),
 
     padj_threshold = as.numeric(kv$padj_threshold %||% 0.05),
@@ -63,6 +63,8 @@ parse_args <- function() {
 
     out_graphml = kv$out_graphml %||%
       here("outputs", "Stage3_Network_for_RISK_bracken.graphml"),
+    out_homd_graphml = kv$out_homd_graphml %||%
+      here("outputs", "Stage3_Network_HOMD_Niche_bracken.graphml"),
     out_annotation_csv = kv$out_annotation_csv %||%
       here("outputs", "Stage3_RISK_Annotations_bracken.csv"),
     out_validation_csv = kv$out_validation_csv %||%
@@ -187,22 +189,26 @@ load_deseq_results <- function(deseq_dir) {
   out
 }
 
-load_epathogen_map <- function(path) {
-  epi <- read.csv(path, stringsAsFactors = FALSE)
+load_annotated_species <- function(path) {
+  ann <- read.csv(path, stringsAsFactors = FALSE)
 
-  if (!all(c("Name", "Human.classification") %in% colnames(epi))) {
-    warning("ePathogen file missing expected columns; species risk_group will be set to Unknown.")
-    return(tibble(name_norm = character(), risk_group = character(), taxID = numeric()))
+  if (!all(c("name", "RiskGroup", "HOMD.Category", "taxRank") %in% colnames(ann))) {
+    warning("Annotated species file missing expected columns.")
+    return(tibble(name_norm = character(), risk_group = character(), homd_category = character(), homd = character(), tax_rank = character(), taxID = numeric()))
   }
 
-  epi %>%
+  ann %>%
     transmute(
       taxID = suppressWarnings(as.numeric(taxID)),
-      name_norm = normalize_label(Name),
-      risk_group = as.character(Human.classification)
+      name_norm = normalize_label(name),
+      species_name = as.character(name),
+      tax_rank = as.character(taxRank),
+      risk_group = as.character(RiskGroup),
+      homd_category = as.character(HOMD.Category),
+      homd = as.character(HOMD)
     ) %>%
-    filter(!is.na(risk_group), risk_group != "") %>%
-    distinct(taxID, name_norm, .keep_all = TRUE)
+    filter(!is.na(species_name), species_name != "") %>%
+    distinct(species_name, .keep_all = TRUE)
 }
 
 phase1_normalize <- function(mat) {
@@ -347,12 +353,23 @@ run_positive_fgsea <- function(deseq_df, padj_thr, lfc_thr) {
 build_nodes <- function(edges, species_set, gene_set, species_meta = NULL) {
   node_ids <- unique(c(edges$from, edges$to))
 
+  # Determine node class based on edge types and explicit sets
+  # Extract species-related nodes from edge types
+  species_nodes_from_edges <- unique(edges$from[edges$edge_type %in% c("Species_Gene", "Species_Species")])
+  gene_nodes_from_edges <- unique(edges$to[edges$edge_type %in% c("Species_Gene", "Gene_Gene")])
+  
+  # For gene-gene edges, both from and to are genes
+  gene_nodes_from_gg <- unique(c(
+    edges$from[edges$edge_type == "Gene_Gene"],
+    edges$to[edges$edge_type == "Gene_Gene"]
+  ))
+
   nodes <- tibble(
     id = node_ids,
     name = node_ids,
     node_class = case_when(
-      node_ids %in% species_set ~ "Species",
-      node_ids %in% gene_set ~ "Gene",
+      node_ids %in% species_set | node_ids %in% species_nodes_from_edges ~ "Species",
+      node_ids %in% gene_set | node_ids %in% gene_nodes_from_gg ~ "Gene",
       TRUE ~ "Unknown"
     )
   )
@@ -419,6 +436,63 @@ compute_jaccard_validation <- function(stat_clusters, annotation_df) {
     arrange(desc(jaccard), desc(intersection))
 }
 
+build_homd_edges <- function(species_meta) {
+  # Build edges between species that share the same HOMD category (ecological niche)
+  # Only include species that have HOMD.Category != "NotAnnotated"
+  
+  annotated_species <- species_meta %>%
+    filter(!is.na(homd_category), homd_category != "NotAnnotated", homd_category != "")
+  
+  if (nrow(annotated_species) < 2) {
+    return(tibble(
+      from = character(),
+      to = character(),
+      weight = numeric(),
+      edge_class = character(),
+      edge_type = character(),
+      raw_value = character()
+    ))
+  }
+  
+  # Group species by HOMD category
+  homd_groups <- split(annotated_species$species_name, annotated_species$homd_category)
+  
+  # Create edges within each HOMD category
+  edges_list <- list()
+  
+  for (homd_cat in names(homd_groups)) {
+    species_in_cat <- homd_groups[[homd_cat]]
+    if (length(species_in_cat) >= 2) {
+      # Create all pairwise edges within this HOMD category
+      for (i in 1:(length(species_in_cat) - 1)) {
+        for (j in (i + 1):length(species_in_cat)) {
+          edges_list[[length(edges_list) + 1]] <- tibble(
+            from = species_in_cat[i],
+            to = species_in_cat[j],
+            weight = 1.0,
+            edge_class = "HOMD_Shared",
+            edge_type = "HOMD_Niche",
+            raw_value = homd_cat
+          )
+        }
+      }
+    }
+  }
+  
+  if (length(edges_list) == 0) {
+    return(tibble(
+      from = character(),
+      to = character(),
+      weight = numeric(),
+      edge_class = character(),
+      edge_type = character(),
+      raw_value = character()
+    ))
+  }
+  
+  bind_rows(edges_list)
+}
+
 # Main execution
 cfg <- parse_args()
 
@@ -427,7 +501,7 @@ gene_mat_raw <- load_gene_matrix(cfg$filtered_gene_counts)
 species_loaded <- load_species_matrix(cfg$species_abundance, cfg$species_list_nonhuman)
 species_mat_raw <- species_loaded$species_matrix
 species_info <- species_loaded$species_info
-epathogen_map <- load_epathogen_map(cfg$epathogen)
+annotated_sp <- load_annotated_species(cfg$annotated_species)
 
 deseq_df <- load_deseq_results(cfg$deseq_dir)
 
@@ -549,18 +623,14 @@ if (nrow(all_edges) == 0) {
 species_set <- unique(c(rownames(species_norm), species_gene_edges$from))
 gene_set <- unique(c(rownames(gene_norm), species_gene_edges$to))
 
-species_meta <- species_info %>%
-  transmute(
-    species_name = as.character(name),
-    taxID = suppressWarnings(as.numeric(taxID)),
-    name_norm = normalize_label(species_name)
+species_meta <- annotated_sp %>%
+  select(species_name, taxID, tax_rank, risk_group, homd_category, homd) %>%
+  mutate(
+    risk_group = ifelse(is.na(risk_group) | risk_group == "", "Unknown", risk_group),
+    homd_category = ifelse(is.na(homd_category) | homd_category == "", "NotAnnotated", homd_category),
+    tax_rank = ifelse(is.na(tax_rank) | tax_rank == "", "Unknown", tax_rank)
   ) %>%
-  left_join(
-    epathogen_map %>% select(taxID, name_norm, risk_group),
-    by = c("taxID", "name_norm")
-  ) %>%
-  mutate(risk_group = ifelse(is.na(risk_group) | risk_group == "", "Unknown", risk_group)) %>%
-  select(species_name, taxID, risk_group)
+  distinct(species_name, .keep_all = TRUE)
 
 nodes <- build_nodes(
   all_edges,
@@ -570,6 +640,23 @@ nodes <- build_nodes(
 )
 
 build_graph(all_edges, nodes, cfg$out_graphml)
+
+# Build and export HOMD niche graph
+cat("[Stage3-Bracken] Building HOMD ecological niche network...\n")
+homd_edges <- build_homd_edges(species_meta)
+
+if (nrow(homd_edges) > 0) {
+  homd_nodes <- build_nodes(
+    homd_edges,
+    species_set = species_set,
+    gene_set = gene_set,
+    species_meta = species_meta
+  )
+  build_graph(homd_edges, homd_nodes, cfg$out_homd_graphml)
+  cat("HOMD niche network built with", nrow(homd_edges), "edges\n")
+} else {
+  cat("No HOMD niche edges found (no species share annotated HOMD categories)\n")
+}
 
 stat_clusters <- compute_coexpression_clusters(
   gene_gene_edges = gene_gene_edges,
@@ -603,5 +690,6 @@ if (cfg$export_phases) {
 
 cat("[Stage3-Bracken] Done.\n")
 cat("GraphML:", cfg$out_graphml, "\n")
+cat("HOMD Niche GraphML:", cfg$out_homd_graphml, "\n")
 cat("Annotation CSV:", cfg$out_annotation_csv, "\n")
 cat("Validation CSV:", cfg$out_validation_csv, "\n")
