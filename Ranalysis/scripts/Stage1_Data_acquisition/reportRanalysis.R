@@ -2498,6 +2498,13 @@ run_script_with_args(file.path(config$RANALYSIS_DIR, "scripts", "Stage1_Data_acq
                      c("--df", "species_df", "--output", "annotated_species", 
                        "--databases-dir", config$DATABASES_DIR))
 
+# Always export annotated_species when it is created
+if (exists("annotated_species", envir = .GlobalEnv)) {
+  annotated_species_export <- get("annotated_species", envir = .GlobalEnv)
+  output_csv_file(annotated_species_export, "annotated_species", config$output_dir, "")
+  cat("Annotated species CSV exported to output directory\n")
+}
+
 # Run species annotation if annotated species_list is available
 if (config$SA_STATS) {
   cat("Running species annotation...\n")
