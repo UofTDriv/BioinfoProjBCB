@@ -232,7 +232,7 @@ make_parallel_backend <- function(num_cores) {
   cl
 }
 
-parallel_extract_edges_from_cor <- function(cor_mat, threshold, edge_type) {
+parallel_extract_edges_from_cor <- function(cor_mat, threshold, edge_type, show_progress = TRUE, chunk_size = 500L) {
   n <- nrow(cor_mat)
   if (n < 2) {
     return(tibble(
@@ -246,23 +246,49 @@ parallel_extract_edges_from_cor <- function(cor_mat, threshold, edge_type) {
   }
 
   idx <- seq_len(n - 1)
-  edges <- foreach(i = idx, .combine = bind_rows, .packages = "dplyr") %dopar% {
-    vals <- cor_mat[i, (i + 1):n]
-    keep <- which(!is.na(vals) & abs(vals) > threshold)
-    if (length(keep) == 0) return(tibble())
+  chunk_size <- max(1L, as.integer(chunk_size))
+  chunks <- split(idx, ceiling(seq_along(idx) / chunk_size))
+  total_chunks <- length(chunks)
+  start_time <- Sys.time()
+  update_every <- max(1L, floor(total_chunks / 20L))
 
-    j <- keep + i
-    tibble(
-      from = rownames(cor_mat)[i],
-      to = rownames(cor_mat)[j],
-      weight = abs(vals[keep]),
-      edge_class = ifelse(vals[keep] >= 0, "Positive", "Negative"),
-      edge_type = edge_type,
-      raw_value = as.numeric(vals[keep])
-    )
+  if (show_progress) {
+    cat("[", edge_type, "] Building edges in ", total_chunks, " chunks...\n", sep = "")
+    pb <- txtProgressBar(min = 0, max = total_chunks, style = 3)
+    on.exit(close(pb), add = TRUE)
   }
 
-  edges
+  edges_list <- vector("list", total_chunks)
+  for (k in seq_along(chunks)) {
+    chunk_idx <- chunks[[k]]
+    edges_list[[k]] <- foreach(i = chunk_idx, .combine = bind_rows, .packages = "dplyr") %dopar% {
+      vals <- cor_mat[i, (i + 1):n]
+      keep <- which(!is.na(vals) & abs(vals) > threshold)
+      if (length(keep) == 0) return(tibble())
+
+      j <- keep + i
+      tibble(
+        from = rownames(cor_mat)[i],
+        to = rownames(cor_mat)[j],
+        weight = abs(vals[keep]),
+        edge_class = ifelse(vals[keep] >= 0, "Positive", "Negative"),
+        edge_type = edge_type,
+        raw_value = as.numeric(vals[keep])
+      )
+    }
+
+    if (show_progress) {
+      setTxtProgressBar(pb, k)
+      if (k == 1L || k == total_chunks || (k %% update_every) == 0L) {
+        elapsed_sec <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+        eta_sec <- if (k > 0) (elapsed_sec / k) * (total_chunks - k) else NA_real_
+        cat(sprintf("\n[%s] %d/%d chunks | elapsed: %ds | ETA: %ds\n",
+                    edge_type, k, total_chunks, round(elapsed_sec), round(eta_sec)))
+      }
+    }
+  }
+
+  bind_rows(edges_list)
 }
 
 run_positive_fgsea <- function(deseq_df, padj_thr, lfc_thr) {
