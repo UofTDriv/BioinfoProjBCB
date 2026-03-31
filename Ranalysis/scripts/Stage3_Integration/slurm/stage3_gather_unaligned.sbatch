@@ -10,7 +10,16 @@ set -euo pipefail
 cd "${SLURM_SUBMIT_DIR}"
 
 module purge
-module load R
+module load gnu15/15.1.0
+module load R/4.5.0
+
+# Set environment for system dependencies
+export PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/lib/pkgconfig:$PKG_CONFIG_PATH
+export INCLUDE_DIR=/usr/include
+export LIB_DIR=/usr/lib64
+export CFLAGS="-I/usr/include -I/usr/include/curl"
+export LDFLAGS="-L/usr/lib64"
+export LD_LIBRARY_PATH=/usr/lib64:$LD_LIBRARY_PATH
 
 Rscript Ranalysis/scripts/Stage3_Integration/stage3_gather.R \
   data_dir=data/processed/stage3_batches_unaligned_hpc \

@@ -1,5 +1,15 @@
 #!/usr/bin/env Rscript
 
+# Skip renv isolation and use system packages
+if (file.exists("renv/activate.R")) {
+  # Don't activate renv, just ensure key packages are available
+  for (pkg in c("dplyr", "tidyr", "stringr", "here")) {
+    if (!requireNamespace(pkg, quietly = TRUE)) {
+      install.packages(pkg, quiet = TRUE, verbose = FALSE)
+    }
+  }
+}
+
 suppressPackageStartupMessages({
   library(dplyr)
   library(tidyr)

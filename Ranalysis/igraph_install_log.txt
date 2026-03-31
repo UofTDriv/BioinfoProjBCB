@@ -1,0 +1,55 @@
+- One or more packages recorded in the lockfile are not installed.
+- Use `renv::status()` for more details.
+The following package(s) will be installed:
+- cli       [3.6.5]
+- cpp11     [0.5.3]
+- glue      [1.8.0]
+- igraph    [2.2.2]
+- lattice   [0.22-9]
+- lifecycle [1.0.5]
+- magrittr  [2.0.4]
+- Matrix    [1.7-5]
+- pkgconfig [2.0.3]
+- rlang     [1.1.7]
+- vctrs     [0.7.2]
+These packages will be installed into "~/BCB330Proj/BioinfoProjBCB/Ranalysis/renv/library/linux-rocky-10.1/R-4.5/x86_64-pc-linux-gnu".
+
+# Downloading packages -------------------------------------------------------
+[?25l  (0/1) Downloading: igraph                                                                                                                                     [32m✔[0m igraph 2.2.2                             [5.1 MB in 0.26s]
+                                                                                Successfully downloaded 1 package in 0.52 seconds.
+
+# Installing packages --------------------------------------------------------
+[32m✔[0m Matrix 1.7-5                             [linked from cache]
+[32m✔[0m magrittr 2.0.4                           [linked from cache]
+[32m✔[0m cli 3.6.5                                [linked from cache]
+[32m✔[0m glue 1.8.0                               [linked from cache]
+[32m✔[0m vctrs 0.7.2                              [linked from cache]
+[32m✔[0m cpp11 0.5.3                              [linked from cach  (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                          (0/2) Building: Matrix                                                                                                                                        [32m✔[0m Matrix 1.7-5                             [built from source in 2.8m]
+  (1/2) Building: igraph                                                          (1/2) Building: igraph                                                                                                                                        [31m✖[0m igraph 2.2.2                            
+Successfully installed 3 packages in 180 seconds.
+
+The following package(s) were  (0/1) Building: igraph                                                          (0/1) Building: igraph                                                          (0/1) Building: igraph                                                          (0/1) Building: igraph                                                          (0/1) Building: igraph                                                                                                                                        [32m✔[0m igraph 2.2.2                             [built from source in 3.2m]
+Successfully installed 11 packages in 190 seconds.
+[?25hg C++ compiler: ‘g++ (GCC) 15.1.0’
+gfortran -fvisibility=hidden -fpic  -O2 -flto=auto -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -fstack-protector-strong -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -m64 -march=x86-64-v3 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -mtls-dialect=gnu2   -I/usr/lib64/gfortran/modules   -c vendor/arpack/dgetv0.f -o vendor/arpack/dgetv0.o
+f951: Fatal Error: inaccessible plugin file /opt/ohpc/pub/compiler/gcc/15.1.0/lib/gcc/x86_64-pc-linux-gnu/15.1.0/plugin/annobin.so expanded from short plugin name annobin: No such file or directory
+compilation terminated.
+make: *** [/usr/lib64/R/etc/Makeconf:225: vendor/arpack/dgetv0.o] Error 1
+ERROR: compilation failed for package ‘igraph’
+* removing ‘/home/wranalab/derivard/BCB330Proj/BioinfoProjBCB/Ranalysis/renv/staging/4/igraph’
+
+[?25h--help' for more information.
+libxml2 include directories: -I/usr/include/libxml2
+libxml2 library link flags: -lxml2 -lz -llzma -lm
+Using vendored GLPK
+** libs
+using C compiler: ‘gcc (GCC) 15.1.0’
+using C++ compiler: ‘g++ (GCC) 15.1.0’
+gfortran -fvisibility=hidden -fpic  -O2 -flto=auto -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -fstack-protector-strong -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -m64 -march=x86-64-v3 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -mtls-dialect=gnu2   -I/usr/lib64/gfortran/modules   -c vendor/arpack/dgetv0.f -o vendor/arpack/dgetv0.o
+f951: Fatal Error: inaccessible plugin file /opt/ohpc/pub/compiler/gcc/15.1.0/lib/gcc/x86_64-pc-linux-gnu/15.1.0/plugin/annobin.so expanded from short plugin name annobin: No such file or directory
+compilation terminated.
+make: *** [/usr/lib64/R/etc/Makeconf:225: vendor/arpack/dgetv0.o] Error 1
+ERROR: compilation failed for package ‘igraph’
+* removing ‘/home/wranalab/derivard/BCB330Proj/BioinfoProjBCB/Ranalysis/renv/staging/3/igraph’
+
+[?25h

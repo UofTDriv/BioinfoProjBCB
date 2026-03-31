@@ -1590,12 +1590,13 @@ merge_count_matrices <- function(rpm_dir) {
 
 filter_gene_counts <- function(count_mat, rrna_file,
                                protein_coding_filter = PROTEIN_CODING_FILTER,
-                               remove_mt_genes = REMOVE_MT_GENES,
-                               go_annotation_filter = GO_ANNOTATION_FILTER) {
+                               remove_mt_genes = REMOVE_MT_GENES) {
   if (is.null(count_mat) || nrow(count_mat) == 0) {
     return(NULL)
   }
+  
   cat("Initial gene count:", nrow(count_mat), "\n")
+  
   # Step 1: Remove rRNA genes
   if (!is.null(rrna_file) && file.exists(rrna_file)) {
     cat("Removing rRNA genes...\n")
@@ -1607,12 +1608,14 @@ filter_gene_counts <- function(count_mat, rrna_file,
   } else {
     cat("  No rRNA gene list found, skipping rRNA filtering\n")
   }
+
   # Step 2: Drop rows which are all 0
   cat("Removing zero-count genes...\n")
   numeric_cols <- count_mat %>% select(where(is.numeric))
   keep_rows <- rowSums(numeric_cols, na.rm = TRUE) > 0
   count_mat <- count_mat[keep_rows, , drop = FALSE]
   cat("  After zero removal:", nrow(count_mat), "genes\n")
+
   # Step 3: Merge alternative splice genes
   cat("Merging alternative splice variants (-AS#)...\n")
   count_mat$Geneid_trim <- gsub("-AS[0-9]", "", count_mat$Geneid)
@@ -1622,6 +1625,7 @@ filter_gene_counts <- function(count_mat, rrna_file,
     summarize(across(where(is.numeric), sum, na.rm = TRUE), .groups = "drop")
   colnames(count_mat)[1] <- "Geneid"
   cat("  After AS merging:", nrow(count_mat), "genes\n")
+
   # Step 4: Merge duplicate gene variants
   cat("Merging duplicate gene variants (_#)...\n")
   count_mat$Geneid_trim2 <- gsub("_[0-9]", "", count_mat$Geneid)
@@ -1631,10 +1635,12 @@ filter_gene_counts <- function(count_mat, rrna_file,
     summarize(across(where(is.numeric), sum, na.rm = TRUE), .groups = "drop")
   colnames(count_mat)[1] <- "Geneid"
   cat("  After duplicate merging:", nrow(count_mat), "genes\n")
+
   # Step 5: Remove LOC genes
   cat("Removing LOC genes...\n")
   count_mat <- count_mat %>% filter(!grepl("^LOC[0-9]*", Geneid))
   cat("  After LOC removal:", nrow(count_mat), "genes\n")
+
   # Step 6: Remove LINC genes
   cat("Removing LINC genes...\n")
   count_mat <- count_mat %>% filter(!grepl("^LINC[0-9]*", Geneid))
@@ -1704,51 +1710,6 @@ filter_gene_counts <- function(count_mat, rrna_file,
     cat("  After MT removal:", nrow(count_mat), "genes\n")
   } else {
     cat("Mitochondrial gene removal skipped (--no-remove-mt)\n")
-  }
-
-  # Step 9: Keep only genes with any GO annotation (optional)
-  if (go_annotation_filter) {
-    cat("Filtering genes with GO annotations (org.Hs.eg.db)...\n")
-    if (!requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
-      cat("  org.Hs.eg.db not installed; attempting installation...\n")
-      tryCatch({
-        install.packages("BiocManager", repos = "https://cloud.r-project.org")
-        BiocManager::install("org.Hs.eg.db", ask = FALSE, update = FALSE)
-      }, error = function(e) {
-        warning("Failed to install org.Hs.eg.db: ", e$message)
-      })
-    }
-
-    if (requireNamespace("org.Hs.eg.db", quietly = TRUE) && requireNamespace("AnnotationDbi", quietly = TRUE)) {
-      go_mapped <- tryCatch({
-        AnnotationDbi::select(
-          org.Hs.eg.db::org.Hs.eg.db,
-          keys = as.character(count_mat$Geneid),
-          columns = "GO",
-          keytype = "SYMBOL"
-        )
-      }, error = function(e) {
-        warning("GO annotation query failed: ", e$message)
-        NULL
-      })
-
-      if (!is.null(go_mapped) && nrow(go_mapped) > 0) {
-        annotated_genes <- unique(go_mapped$SYMBOL[!is.na(go_mapped$GO)])
-        annotated_genes <- annotated_genes[!is.na(annotated_genes) & nzchar(annotated_genes)]
-        if (length(annotated_genes) > 0) {
-          count_mat <- count_mat[count_mat$Geneid %in% annotated_genes, , drop = FALSE]
-          cat("  After GO annotation filter:", nrow(count_mat), "genes\n")
-        } else {
-          warning("GO annotation filter returned no matching genes; skipping this step")
-        }
-      } else {
-        warning("No GO annotation data returned; skipping GO filter")
-      }
-    } else {
-      warning("org.Hs.eg.db or AnnotationDbi unavailable; skipping GO annotation filter")
-    }
-  } else {
-    cat("GO annotation filter skipped (--no-go-annotation)\n")
   }
 
   return(as.data.frame(count_mat))

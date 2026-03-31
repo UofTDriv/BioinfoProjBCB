@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=st3_worker
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=16G
-#SBATCH --time=08:00:00
-#SBATCH --output=Ranalysis/scripts/Stage3_Integration/slurm/logs/st3_worker_%A_%a.out
+#SBATCH --job-name=st3_worker_single
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --time=12:00:00
+#SBATCH --output=Ranalysis/scripts/Stage3_Integration/slurm/logs/st3_worker_single_%j.out
 
 set -euo pipefail
 
@@ -24,12 +24,14 @@ export LD_LIBRARY_PATH=/usr/lib64:$LD_LIBRARY_PATH
 DATA_DIR="${DATA_DIR:-data/processed/stage3_batches_bracken_hpc}"
 GENE_CORR_THRESHOLD="${GENE_CORR_THRESHOLD:-0.6}"
 
-if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
-  echo "SLURM_ARRAY_TASK_ID is not set. Submit this script with --array=1-N."
+# Accept batch ID as first argument instead of array task ID
+BATCH_ID="${1:-}"
+if [[ -z "${BATCH_ID}" ]]; then
+  echo "BATCH_ID not provided. Usage: sbatch stage3_worker_single.sbatch <batch_id>"
   exit 1
 fi
 
 Rscript Ranalysis/scripts/Stage3_Integration/stage3_worker.R \
-  batch_id=${SLURM_ARRAY_TASK_ID} \
+  batch_id=${BATCH_ID} \
   data_dir=${DATA_DIR} \
   gene_corr_threshold=${GENE_CORR_THRESHOLD}

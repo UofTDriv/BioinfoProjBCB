@@ -9,3 +9,5 @@ renv/*
 BioinfoProjBCB.Rproj
 .Rhistory
 renv.lock
+Ranalysis/scripts/Stage3_Integration/slurm/logs/*
+Ranalysis/databases/*

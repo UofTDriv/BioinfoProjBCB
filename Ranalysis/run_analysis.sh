@@ -77,6 +77,19 @@ if [ "$BRACKEN_RAN" = true ]; then
         2>&1 | tee "${LOG_DIR}/stage3_network_fusion_bracken_${TIMESTAMP}.log"
 fi
 
+# --- STAGE 4: Model Validation ---
+log_msg "Starting Stage 4: Model Validation"
+
+log_msg "Fetching External Disease Databases..."
+Rscript Ranalysis/scripts/Stage4_Validation/01_fetch_disease_databases.R \
+    2>&1 | tee "${LOG_DIR}/stage4_db_fetch_${TIMESTAMP}.log"
+
+log_msg "Computing Cross-Reference Validation Metrics..."
+Rscript Ranalysis/scripts/Stage4_Validation/02_cross_reference_metrics.R \
+    2>&1 | tee "${LOG_DIR}/stage4_metrics_${TIMESTAMP}.log"
+
+log_msg "Validation Pipeline Execution Complete."
+
 log_msg "Pipeline execution complete!"
 echo "============================================="
 echo "Done. Check logs at: ${LOG_DIR}"

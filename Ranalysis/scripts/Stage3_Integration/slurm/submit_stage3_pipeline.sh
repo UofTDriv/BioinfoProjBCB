@@ -2,7 +2,7 @@
 set -euo pipefail
 
 MODE="${1:-bracken}"
-BASE_DIR="Ranalysis/scripts/Stage3_Integration/slurm"
+BASE_DIR="/home/wranalab/derivard/BCB330Proj/BioinfoProjBCB/Ranalysis/scripts/Stage3_Integration/slurm"
 
 if [[ "${MODE}" == "bracken" ]]; then
   SCATTER_SCRIPT="${BASE_DIR}/stage3_scatter_bracken.sbatch"
@@ -27,7 +27,7 @@ echo "Submitting worker array after scatter completion..."
 # Keep array size synced with scatter num_batches value in sbatch scripts.
 WORKER_JID=$(sbatch --parsable \
   --dependency=afterok:${SCATTER_JID} \
-  --array=1-200 \
+  --array=1-50 \
   --export=ALL,DATA_DIR=${DATA_DIR},GENE_CORR_THRESHOLD=0.6 \
   "${BASE_DIR}/stage3_worker_array.sbatch")
 
