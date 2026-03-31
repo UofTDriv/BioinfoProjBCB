@@ -1,82 +1,89 @@
+Based on the detailed structure of your current scripts and the orchestration logic found in `run_analysis.sh`, here is an updated `README.md`. This version enhances the documentation of the directory structure, clarifies the multi-track processing (Unaligned vs. Bracken), and adds a "Quick Start" section for the pipeline.
+
+***
 
 # Pathogen-Agnostic Metatranscriptomic Disease Networks
 
-**Project Lead:** Denis Rivard | **Supervisor:** Jeffrey Wrana
+**Project Lead:** Denis Rivard | **Supervisor:** Jeffrey Wrana  
+**Context:** BCB330Y1 - Bioinformatics and Computational Biology Special Project
 
-**Objective:** To integrate host transcriptomic data with microbial taxonomic classification to reveal functional pathogen-gene-microbiome associations.
+## Objective
+To integrate host transcriptomic data with microbial taxonomic classification to reveal functional pathogen-gene-microbiome associations. This framework transforms microbial read abundance and host differential expression into a heterogeneous pathogen-gene-microbe network, identifying systems-level dynamics in Upper Respiratory Tract Infections (URTIs).
 
-## Project Overview
+## Five-Stage Pipeline Architecture
+The pipeline follows a modular design, allowing for both automated orchestration and independent script execution.
 
-This framework transforms microbial read abundance and host differential expression into a heterogeneous pathogen-gene-microbe network. It utilizes a reproducible five-stage pipeline to map how infection-driven gene regulation coincides with shifts in microbial communities.
+### 1. Data Acquisition & Pre-processing
+* **Workflow:** Collection of raw metatranscriptomic data (FASTQ) and reference databases (Kraken2, ePathogen, HOMD, GO).
+* **Key Tool:** `reportRanalysis.R` orchestrates the initial ingestion and formatting.
+* **Outputs:** Structured repository and acquisition logs.
 
-## Directory Structure
-
-The structure is modeled after the `RNASeqKraken2Ranalysis` workflow:
-
-```
-project_root/
-├── data/
-│   ├── METASEQ_pipeline/      # Stage 1: Processing Raw sequencing data
-│   ├── other/                 # Stage 2: Other mats
-│   ├── references/            # Stage 1: GRCh38, Kraken2 DB, GO, etc.
-│   └── processed/             # Stage 2: Combined/filtered matrixes
-├── outputs/
-│   ├── DESeq2_results
-│   └── Graphs
-├── Ranalysis/
-│   ├── scripts/               # Core software modules
-│   │   ├── Stage1_Data_acquisition # Based on RNASeqKraken2Ranalysis
-│   │   ├── Stage2_Processing/ # DESeq2 analysis
-│   │   ├── Stage3_Integration/# Network construction and data fusion
-│   │   ├── Stage4_Validation/ # Performance metrics
-│   │   └── Stage5_Visual/    # Cytoscape export scripts
-│   └── databases/             # ePathogen, HOMD, DisGeNET, BioGRID
-├── renv/                      # Package management and environment logs
-└── README.md                  # Software plan and documentation
-
-```
-
-## Five-Stage Pipeline Workflow
-
-### 1. Data Acquisition
-
-* **Workflow:** Collection of sample-level metatranscriptomic data and external reference databases.
-* **Inputs:** Raw FASTQ files, Kraken2 standard database, and Gene Ontology (GO) resources.
-* **Outputs:** Structured raw data repository and acquisition logs.
-
-### 2. Data Processing
-
-* **Workflow:** Alignment and classification using the `RNASeqKraken2Ranalysis` suite.
-* **Key Tasks:** Host removal (STAR), host gene quantification (FeatureCounts), and microbial classification (Kraken2/Bracken).
-* **Inputs:** Raw FASTQs.
-* **Outputs:** Host DEG analysis (high vs. low count groups), per-sample metagenomics "kreports," and microbe co-occurrence matrices.
+### 2. Data Processing (Host & Microbe)
+* **Host Analysis:** STAR alignment and `FeatureCounts` for gene quantification, followed by `DESeq2` to identify DEGs based on microbial load.
+* **Microbial Analysis:** Taxonomic classification via `Kraken2` and abundance estimation via `Bracken`.
+* **Dual-Track Processing:** The pipeline automatically detects if Bracken outputs exist and executes parallel tracks for "Unaligned" and "Bracken" datasets.
 
 ### 3. Data Integration and Modeling
-
-* **Workflow:** Construction of a bipartite pathogen-gene network followed by data fusion into homogeneous layers.
-* **Tasks:** * Compute pathogen-gene correlation matrix (Pearson/Spearman).
-    * Project heterogeneous data into gene-gene and pathogen-pathogen networks.
-    * Denoise via clustering: GO-based modules for genes and neighborhood analysis for pathogens.
-
-
-* **Inputs:** DEG significance values and microbe abundance tables.
-* **Outputs:** Clustered networks and integrated metagraph.
+* **Bipartite Construction:** Computes pathogen-gene correlation matrices (Pearson/Spearman).
+* **Data Fusion:** Projects heterogeneous data into homogeneous Gene-Gene and Pathogen-Pathogen layers.
+* **Denoising:** Implements GO-based clustering for gene modules and neighborhood-defined clustering for pathogens.
 
 ### 4. Model Validation
-
-* **Workflow:** Verification of associations using independent public cohorts and biological benchmarks.
-* **Tasks:** Cross-reference findings with Disease Ontology, HuDiNe (comorbidities), and DisGeNET (gene-disease associations).
-* **Inputs:** Integrated metagraph.
-* **Outputs:** Validation metrics and assessment of reproducibility across public FASTQs (e.g., GEO).
+* **Verification:** Cross-references findings with external benchmarks including Disease Ontology, HuDiNe (comorbidities), and DisGeNET.
+* **Reproducibility:** Validates the metagraph structure against independent public cohorts (e.g., GEO).
 
 ### 5. Visualization and Interaction
+* **Network Rendering:** Generates `.graphml` files for high-resolution interactive analysis in Cytoscape.
+* **Encoding:** Node/edge attributes (color/style) represent source data and statistical significance.
 
-* **Workflow:** Network rendering and structural analysis.
-* **Tasks:** Force-directed layout in Cytoscape; encoding node/edge source through color scales and styles.
-* **Inputs:** Final network adjacency files.
-* **Outputs:** High-resolution interactive disease networks revealing systems-level URTI dynamics.
+---
 
-## Software Requirements
+## Directory Structure
+```text
+project_root/
+├── data/
+│   ├── input/                 # Raw FASTQ and pipeline inputs
+│   ├── processed/             # Merged matrices (e.g., nonhuman_bracken.csv)
+│   └── references/            # Kraken2 DB, ePathogen, HOMD, GO
+├── Ranalysis/
+│   ├── scripts/               
+│   │   ├── Stage1_Data_acquisition/ # reportRanalysis.R, annotate_species.R
+│   │   ├── Stage2_Data_Processing/  # run_deseq2_species_gene[_bracken].R
+│   │   ├── Stage3_Integration/      # Stage3_Combined_Network_Fusion.R
+│   │   └── utils.R                  # Shared I/O and Pavian-based parsers
+│   ├── databases/             # ePathogen, HOMD, DisGeNET
+│   └── renv.lock              # Reproducible environment state
+├── outputs/
+│   ├── DESeq2_results/        # Fold-change and significance tables
+│   ├── Graphs/                # Exported .graphml network files
+│   └── logs/                  # Pipeline execution logs
+└── run_analysis.sh            # Main pipeline orchestration script
+```
 
-* **Environment:** R (v4.0+) with `renv` package management.
-* **Dependencies:** `here`, `ggplot2`, `dplyr`, `igraph` or `tidygraph` (for Stage 3), `DESeq2` (for Stage 2).
+## Quick Start
+
+### Environment Setup
+The project uses `renv` for dependency management. Ensure R (v4.0+) is installed.
+```r
+install.packages("renv")
+renv::restore() # Restore the exact environment from renv.lock
+```
+
+### Execution
+To run the entire pipeline (Stages 1–3) automatically, use the provided bash orchestrator:
+```bash
+chmod +x run_analysis.sh
+./run_analysis.sh
+```
+The script will detect if Bracken results are present and automatically trigger the appropriate DESeq2 and Network Fusion tracks.
+
+## Software Dependencies
+* **Core R:** `DESeq2`, `ggplot2`, `dplyr`, `here`.
+* **Network:** `igraph`, `tidygraph`, `ggraph`.
+* **Utilities:** `foreach`, `doParallel` (for Stage 1 parallelization).
+
+---
+**References**
+* García Del Valle et al. (2019). Metatranscriptomics and Disease Networks.
+* Goh et al. (2007). The human disease network. *PNAS*.
+* Pavian Metagenomics: [fbreitwieser/pavian](https://github.com/fbreitwieser/pavian).
