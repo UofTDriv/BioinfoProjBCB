@@ -11,3 +11,4 @@ BioinfoProjBCB.Rproj
 renv.lock
 Ranalysis/scripts/Stage3_Integration/slurm/logs/*
 Ranalysis/databases/*
+lab_report.md

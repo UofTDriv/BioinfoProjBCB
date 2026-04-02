@@ -46,6 +46,7 @@ parse_args <- function() {
     deseq_dir = kv$deseq_dir %||% here("outputs", "DESeq2_results"),
     padj_threshold = as.numeric(kv$padj_threshold %||% 0.05),
     log2fc_threshold = as.numeric(kv$log2fc_threshold %||% 1.0),
+    top_n_genes = as.integer(kv$top_n_genes %||% 5000),
     num_batches = as.integer(kv$num_batches %||% 50),
     out_dir = kv$out_dir %||% here("data", "processed", "stage3_batches")
   )
@@ -175,6 +176,18 @@ species_mat <- species_mat_raw[, common_samples, drop = FALSE]
 
 cat("[Scatter] Phase 1: log2(x+1) + median-centering...\n")
 gene_norm <- phase1_normalize(gene_mat)
+
+gene_mad <- apply(gene_norm, 1, mad, na.rm = TRUE)
+if (nrow(gene_norm) > cfg$top_n_genes) {
+  mad_threshold <- sort(gene_mad, decreasing = TRUE)[cfg$top_n_genes]
+  keep_genes <- names(gene_mad)[gene_mad >= mad_threshold]
+  filtered_out <- nrow(gene_norm) - length(keep_genes)
+  gene_norm <- gene_norm[keep_genes, , drop = FALSE]
+  cat(sprintf("[Scatter] MAD filtering removed %d genes; MAD threshold used: %.6f\n", filtered_out, mad_threshold))
+} else {
+  cat(sprintf("[Scatter] MAD filtering removed 0 genes; MAD threshold used: %.6f\n", min(gene_mad, na.rm = TRUE)))
+}
+
 species_norm <- phase1_normalize(species_mat)
 
 cat("[Scatter] Building Species_Gene edges...\n")

@@ -45,6 +45,7 @@ parse_args <- function() {
     species_corr_threshold = as.numeric(kv$species_corr_threshold %||% 0.5),
     padj_threshold = as.numeric(kv$padj_threshold %||% 0.05),
     log2fc_threshold = as.numeric(kv$log2fc_threshold %||% 1.0),
+      export_dir = kv$export_dir %||% here("outputs", "stage3_balance_exports"),
     out_graphml = kv$out_graphml %||% here("outputs", "Stage3_Network_for_RISK.graphml"),
     out_homd_graphml = kv$out_homd_graphml %||% here("outputs", "Stage3_Network_HOMD_Niche.graphml"),
     out_annotation_csv = kv$out_annotation_csv %||% here("outputs", "Stage3_RISK_Annotations.csv"),
@@ -61,6 +62,8 @@ cfg <- parse_args()
 ensure_parent_dir <- function(path) {
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
 }
+
+dir.create(cfg$export_dir, recursive = TRUE, showWarnings = FALSE)
 
 cat("[Gather] Reconstructing Species-Species layer...\n")
 norm_species <- readRDS(file.path(cfg$data_dir, "norm_species.rds"))
@@ -106,11 +109,25 @@ species_gene_edges <- readRDS(file.path(cfg$data_dir, "species_gene_edges.rds"))
 all_edges <- rbind(sp_edges, gene_gene_edges, fill=TRUE)
 all_edges <- rbind(all_edges, species_gene_edges, fill=TRUE) %>% as_tibble()
 
+correlation_edge_types <- c("Species_Species", "Gene_Gene")
+all_edges <- all_edges %>%
+  mutate(
+    weight = ifelse(edge_type %in% correlation_edge_types, 1 - as.numeric(weight), as.numeric(weight))
+  )
+
 cat("[Gather] Loading attributes... \n")
 load_annotated_species <- function(path) {
-  if(!file.exists(path)) return(tibble())
+  empty_result <- tibble(
+    species_name = character(),
+    tax_rank = character(),
+    risk_group = character(),
+    homd_category = character(),
+    homd = character()
+  )
+
+  if(!file.exists(path)) return(empty_result)
   ann <- read.csv(path, stringsAsFactors = FALSE)
-  if (!all(c("name", "RiskGroup", "HOMD.Category", "taxRank") %in% colnames(ann))) return(tibble())
+  if (!all(c("name", "RiskGroup", "HOMD.Category", "taxRank") %in% colnames(ann))) return(empty_result)
   
   ann %>%
     transmute(
@@ -154,10 +171,18 @@ build_nodes <- function(edges, species_set, gene_set, species_meta = NULL) {
   nodes
 }
 
-build_graph <- function(edges, nodes, out_path) {
+build_graph <- function(edges, nodes, out_path, export_csv = FALSE, export_dir = cfg$export_dir) {
   ensure_parent_dir(out_path)
   g <- graph_from_data_frame(edges, vertices = nodes, directed = FALSE)
   write_graph(g, out_path, format = "graphml")
+  if (isTRUE(export_csv)) {
+    write.csv(nodes, file.path(export_dir, "Stage3_Nodes.csv"), row.names = FALSE)
+    write.csv(
+      edges %>% mutate(distance = weight),
+      file.path(export_dir, "Stage3_Edges.csv"),
+      row.names = FALSE
+    )
+  }
   g
 }
 
@@ -223,7 +248,7 @@ species_set <- unique(c(rownames(norm_species), species_gene_edges$from))
 gene_set <- unique(c(readRDS(file.path(cfg$data_dir, "norm_genes.rds")) %>% rownames(), species_gene_edges$to))
 
 nodes <- build_nodes(all_edges, species_set, gene_set, species_meta)
-build_graph(all_edges, nodes, cfg$out_graphml)
+build_graph(all_edges, nodes, cfg$out_graphml, export_csv = TRUE)
 
 # HOMD Niche Network
 build_homd_edges <- function(species_meta) {
